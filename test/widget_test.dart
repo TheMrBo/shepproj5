@@ -73,6 +73,23 @@ void main() {
     await tester.tap(find.text('Recipe'));
     await tester.pumpAndSettle();
     expect(find.text(store.recipes[1].steps[0]), findsOneWidget);
+    final steps = store.recipes[1].steps;
+    expect(find.text(steps[1]), findsNothing);
+    await tester.tap(find.text('Next step'));
+    await tester.pumpAndSettle();
+    expect(find.text(steps[1]), findsOneWidget);
+    expect(find.text(steps[0]), findsNothing);
+    await tester.tap(find.text('Previous'));
+    await tester.pumpAndSettle();
+    expect(find.text(steps[0]), findsOneWidget);
+    for (var i = 1; i < steps.length; i++) {
+      await tester.tap(find.text('Next step'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Done'), findsOneWidget);
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.text("Let's cook"), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
