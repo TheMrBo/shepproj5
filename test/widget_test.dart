@@ -70,6 +70,7 @@ void main() {
     await tester.tap(find.text('Pancakes'));
     await tester.pumpAndSettle();
     expect(find.byType(Dialog), findsOneWidget);
+    await tester.ensureVisible(find.text('Recipe'));
     await tester.tap(find.text('Recipe'));
     await tester.pumpAndSettle();
     expect(find.text(store.recipes[1].steps[0]), findsOneWidget);

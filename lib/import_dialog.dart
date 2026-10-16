@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'recipe.dart';
 import 'recipe_import.dart';
+import 'step_timer_widget.dart';
 
 class ImportRecipeDialog extends StatefulWidget {
   final RecipeImporter importer;
@@ -215,39 +216,92 @@ class _ImportRecipeDialogState extends State<ImportRecipeDialog> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                for (var i = 0; i < preview!.steps.length; i++)
+                for (var i = 0; i < preview!.instructions.length; i++) ...[
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 22,
-                          height: 22,
-                          margin: const EdgeInsets.only(right: 10, top: 2),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFFEC4E6E),
-                            shape: BoxShape.circle,
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            '${i + 1}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 22,
+                              height: 22,
+                              margin: const EdgeInsets.only(right: 10, top: 2),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFEC4E6E),
+                                shape: BoxShape.circle,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                '${i + 1}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
-                          ),
+                            Expanded(
+                              child: Text(
+                                preview!.instructions[i].directionText,
+                                style: const TextStyle(fontSize: 13, height: 1.5),
+                              ),
+                            ),
+                          ],
                         ),
-                        Expanded(
-                          child: Text(
-                            preview!.steps[i],
-                            style: const TextStyle(fontSize: 13, height: 1.5),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 32, top: 4),
+                          child: ActionChip(
+                            avatar: Icon(
+                              preview!.instructions[i].timerDuration != null
+                                  ? Icons.timer
+                                  : Icons.timer_outlined,
+                              size: 14,
+                              color: preview!.instructions[i].timerDuration != null
+                                  ? const Color(0xFFEC4E6E)
+                                  : Colors.grey,
+                            ),
+                            label: Text(
+                              preview!.instructions[i].timerDuration != null
+                                  ? 'Timer detected: ${preview!.instructions[i].timerDuration!.inMinutes}m ${preview!.instructions[i].timerDuration!.inSeconds % 60}s'
+                                  : '+ Add Timer',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: preview!.instructions[i].timerDuration != null
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            onPressed: () async {
+                              final result = await showDialog<Duration>(
+                                context: context,
+                                builder: (_) => StepTimerPickerDialog(
+                                  initialDuration:
+                                      preview!.instructions[i].timerDuration,
+                                ),
+                              );
+                              if (result != null && preview != null) {
+                                final updatedInstructions =
+                                    List<InstructionStep>.from(preview!.instructions);
+                                updatedInstructions[i] = updatedInstructions[i].copyWith(
+                                  timerDuration: result.inSeconds > 0 ? result : null,
+                                  clearTimer: result.inSeconds == 0,
+                                );
+                                setState(() {
+                                  preview = preview!.copyWith(
+                                    instructions: updatedInstructions,
+                                  );
+                                });
+                              }
+                            },
                           ),
                         ),
                       ],
                     ),
                   ),
+                ],
               ],
               if (busy)
                 const Padding(
