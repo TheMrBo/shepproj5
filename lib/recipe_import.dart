@@ -72,6 +72,30 @@ class RecipeImporter {
 String _text(dynamic value) =>
     value is String ? (html.parseFragment(value).text ?? '').trim() : '';
 
+String _cleanText(String input) {
+  if (input.isEmpty) return '';
+  var text = input
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  text = text.replaceAll(
+    RegExp(
+      r'^(?:[•\-*]|\d+[.:)]|\bStep\s+\d+[.:)]?)\s*',
+      caseSensitive: false,
+    ),
+    '',
+  ).trim();
+
+  if (text.isEmpty) return '';
+  return text[0].toUpperCase() + text.substring(1);
+}
+
 String _instructionText(String value) {
   final fragment = html.parseFragment(value);
   for (final node in fragment.querySelectorAll(
@@ -412,21 +436,22 @@ Recipe parseRecipeHtml(String source, Uri url) {
       continue;
     }
     for (final item in _recipes(data)) {
-      final name = _text(item['name']);
+      final name = _cleanText(_text(item['name']));
       final rawIngredients = item['recipeIngredient'];
       final ingredients =
           (rawIngredients is List ? rawIngredients : [rawIngredients])
               .map(
                 (v) => v is Map
-                    ? _text('${v['value'] ?? ''} ${v['name'] ?? ''}')
-                    : _text(v),
+                    ? _cleanText('${v['value'] ?? ''} ${v['name'] ?? ''}')
+                    : _cleanText(_text(v)),
               )
               .where((v) => v.isNotEmpty)
               .toList();
       final allSteps = _steps(item['recipeInstructions'], url, document);
       final notices = allSteps
           .where((s) => _isNotice(s.text))
-          .map((s) => s.text)
+          .map((s) => _cleanText(s.text))
+          .where((s) => s.isNotEmpty)
           .toList();
       final illustrated = _illustratedSteps(document, url);
       final steps =
@@ -434,12 +459,13 @@ Recipe parseRecipeHtml(String source, Uri url) {
               .where((s) => !_isNotice(s.text) && !_isPromotion(s.text))
               .map(
                 (s) => (
-                  text: s.text,
+                  text: _cleanText(s.text),
                   image: s.image.isNotEmpty
                       ? s.image
                       : _matchedPhoto(s.text, illustrated),
                 ),
               )
+              .where((s) => s.text.isNotEmpty)
               .toList();
       if (name.isEmpty || ingredients.isEmpty || steps.isEmpty) {
         continue;
