@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#edc3cb">
+  <meta name="description" content="A little inspiration for your next delicious meal. Explore an easy-to-cook recipe collection.">
+  <title>Delicious — Cook like a chef</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#" aria-label="Delicious home"><span>✳</span> delicious<span class="brand-dot">.</span></a>
+    <p class="nav-label">YOUR KITCHEN</p>
+    <nav aria-label="Main navigation">
+      <button class="nav-item active" data-view="discover" aria-current="page"><span aria-hidden="true">⌂</span> Discover</button>
+      <button class="nav-item" data-view="saved"><span aria-hidden="true">♡</span> Saved recipes <span class="saved-count" id="saved-count">2</span></button>
+    </nav>
+    <div class="sidebar-note"><span aria-hidden="true">✧</span><strong>A little kitchen magic.</strong><p>Good food. Simple recipes.<br>Something to look forward to.</p></div>
+    <div class="local-profile"><span class="avatar">Y</span><div>Your kitchen<small>A space for your favorites</small></div></div>
+  </aside>
+  <main class="experience" aria-label="Delicious recipe inspiration">
+    <header class="app-header"><div><p class="small-label">A little inspiration for your day</p><h1 id="page-title">What sounds delicious?</h1></div><span class="header-badge">Made for home cooks <span aria-hidden="true">✧</span></span></header>
+    <section class="welcome panel" aria-labelledby="welcome-title">
+      <div class="welcome-art"><img src="assets/welcome.webp" alt="An illustrated pink bowl overflowing with colorful fresh vegetables"></div>
+      <div class="welcome-copy">
+        <p class="eyebrow">A little inspiration. A lot of flavor.</p>
+        <h2 id="welcome-title">Your next favorite<br>starts in your kitchen.</h2>
+        <p class="welcome-note">Simple ingredients. A little creativity. A plate full of joy.</p>
+        <button class="primary" id="get-started">Explore recipes <span aria-hidden="true">↗</span></button>
+      </div>
+    </section>
+
+    <section class="menu panel" id="recipe-menu" aria-labelledby="menu-title">
+      <div class="browse-header"><div><p class="small-label">FIND YOUR NEXT FAVORITE</p><h2 id="menu-title">Explore recipes</h2></div>
+      <label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="search" type="search" placeholder="Search your perfect recipe" aria-label="Search recipes"></label></div>
+      <div class="categories" aria-label="Filter by category"><button class="category active" data-category="All" aria-pressed="true">All</button><button class="category" data-category="Breakfast" aria-pressed="false">Breakfast</button><button class="category" data-category="Asian food" aria-pressed="false">Asian food</button></div>
+      <div class="section-heading"><h3 id="results-title">Popular</h3><span id="result-count">4 recipes</span></div>
+      <div class="recipe-grid" id="recipe-grid"></div>
+      <p class="menu-footer">Made with love. Shared around the table.</p>
+    </section>
+
+    <dialog class="detail panel" id="recipe-detail" aria-labelledby="recipe-title">
+      <header class="detail-top"><button class="back-button" id="back" aria-label="Close recipe">← <span>Back to recipes</span></button><button class="detail-save" id="detail-save" aria-label="Save recipe" aria-pressed="false">♡</button></header>
+      <div class="dish-art"><img id="detail-image" src="assets/ramen.webp" alt="Illustration of a bowl of ramen"></div>
+      <div class="dish-heading"><h2 id="recipe-title">Ramen</h2><div class="meta"><span id="detail-time">◷ 120 min</span><span><b>★</b> <span id="detail-rating">4.9</span></span></div></div>
+      <h3 class="ingredients-title">Ingredients</h3>
+      <ul class="ingredients" id="ingredients"></ul>
+      <div class="tabs" role="tablist" aria-label="Recipe information"><button id="details-tab" role="tab" aria-selected="true" aria-controls="tab-content" class="tab active">Details</button><button id="recipe-tab" role="tab" aria-selected="false" aria-controls="tab-content" class="tab">Recipe</button></div>
+      <div id="tab-content" class="tab-content" role="tabpanel" aria-labelledby="details-tab" tabindex="0"></div>
+      <button class="primary cook-button" id="cook-button">Let's cook <span aria-hidden="true">›</span></button>
+      <p class="detail-footnote">A little time in the kitchen, a little joy.</p>
+    </dialog>
+  </main>
+  <div class="sr-only" aria-live="polite" id="announcement"></div>
+  <script src="app.js"></script>
+</body>
+</html>
