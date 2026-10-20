@@ -37,7 +37,15 @@ class RecipeImporter {
     final client = clientFactory();
     try {
       return await (() async {
-        final response = await client.send(http.Request('GET', uri));
+        final req = http.Request('GET', uri);
+        req.headers.addAll({
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept':
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        });
+        final response = await client.send(req);
         if (response.statusCode != 200) {
           throw RecipeImportException(
             'The website could not be read (${response.statusCode}). Try another recipe link.',
@@ -516,7 +524,118 @@ Recipe parseRecipeHtml(String source, Uri url) {
       });
     }
   }
+
+  final fallback = _parseHtmlFallback(document, url);
+  if (fallback != null) {
+    return fallback;
+  }
+
   throw const RecipeImportException(
     'No complete recipe was found. Use a recipe page with ingredients and instructions; video-only and social media links are not supported.',
   );
+}
+
+Recipe? _parseHtmlFallback(dom.Document document, Uri url) {
+  String name = '';
+  for (final selector in [
+    '.wprm-recipe-name',
+    '.tasty-recipes-title',
+    '.recipe-title',
+    'h1.entry-title',
+    'h1.recipe-title',
+    'h1.post-title',
+    '[itemprop="name"]',
+    'h1',
+  ]) {
+    final el = document.querySelector(selector);
+    if (el != null && el.text.trim().isNotEmpty) {
+      name = _cleanText(el.text);
+      if (name.isNotEmpty) break;
+    }
+  }
+
+  final ingredients = <String>[];
+  for (final selector in [
+    '.wprm-recipe-ingredient',
+    '.tasty-recipes-ingredients li',
+    '.recipe-ingredients li',
+    '[itemprop="recipeIngredient"]',
+    '.ingredient',
+    '.ingredients li',
+  ]) {
+    final elements = document.querySelectorAll(selector);
+    if (elements.isNotEmpty) {
+      for (final el in elements) {
+        final text = _cleanText(_instructionText(el.innerHtml));
+        if (text.isNotEmpty && !ingredients.contains(text)) {
+          ingredients.add(text);
+        }
+      }
+      if (ingredients.isNotEmpty) break;
+    }
+  }
+
+  final steps = <({String text, String image, Duration? duration})>[];
+  for (final selector in [
+    '.wprm-recipe-instruction',
+    '.tasty-recipes-instructions li',
+    '.recipe-instructions li',
+    '[itemprop="recipeInstructions"] li',
+    '[itemprop="recipeInstructions"] p',
+    '.instruction',
+    '.instructions li',
+  ]) {
+    final elements = document.querySelectorAll(selector);
+    if (elements.isNotEmpty) {
+      for (final el in elements) {
+        final text = _cleanText(_instructionText(el.innerHtml));
+        if (text.isNotEmpty && !_isNotice(text) && !_isPromotion(text)) {
+          final imgEl = el.querySelector('img');
+          final img = _elementImage(imgEl, url);
+          final extracted = RecipeDurationParser.extractDuration(text);
+          steps.add((
+            text: text,
+            image: img,
+            duration: extracted.duration,
+          ));
+        }
+      }
+      if (steps.isNotEmpty) break;
+    }
+  }
+
+  if (name.isEmpty || ingredients.isEmpty || steps.isEmpty) {
+    return null;
+  }
+
+  final image = _dishImage({}, {}, document, url);
+
+  final structuredInstructions = steps
+      .asMap()
+      .entries
+      .map(
+        (entry) => {
+          'stepNumber': entry.key + 1,
+          'directionText': entry.value.text,
+          if (entry.value.duration != null)
+            'timerDurationSeconds': entry.value.duration!.inSeconds,
+        },
+      )
+      .toList();
+
+  return Recipe.fromJson({
+    'id': 'import:${url.removeFragment()}',
+    'sourceUrl': url.removeFragment().toString(),
+    'name': name,
+    'category': 'Imported',
+    'image': image,
+    'rating': '',
+    'description': '',
+    'notices': <String>[],
+    'time': 30,
+    'ingredients': ingredients.map((v) => ['•', v]).toList(),
+    'steps': steps.map((step) => step.text).toList(),
+    'instructions': structuredInstructions,
+    'stepImages': steps.map((step) => step.image).toList(),
+  });
 }

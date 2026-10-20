@@ -7,21 +7,33 @@ class IngredientFormInput {
   final TextEditingController quantityController;
   final TextEditingController unitController;
   final TextEditingController nameController;
+  final TextEditingController prepActionController;
 
   IngredientFormInput({
     String quantity = '',
     String unit = '',
     String name = '',
+    String prepAction = '',
   })  : quantityController = TextEditingController(text: quantity),
         unitController = TextEditingController(text: unit),
-        nameController = TextEditingController(text: name);
+        nameController = TextEditingController(text: name),
+        prepActionController = TextEditingController(text: prepAction);
+
+  IngredientItem toIngredientItem() => IngredientItem(
+        quantity: quantityController.text.trim(),
+        unit: unitController.text.trim(),
+        name: nameController.text.trim(),
+        prepAction: prepActionController.text.trim(),
+      );
 
   List<String> toIngredientPair() {
     final qtyUnit = [quantityController.text.trim(), unitController.text.trim()]
         .where((s) => s.isNotEmpty)
         .join(' ');
     final name = nameController.text.trim();
-    return [qtyUnit.isEmpty ? '•' : qtyUnit, name];
+    final action = prepActionController.text.trim();
+    final nameWithAction = action.isNotEmpty ? '$name ($action)' : name;
+    return [qtyUnit.isEmpty ? '•' : qtyUnit, nameWithAction];
   }
 
   bool get isValid => nameController.text.trim().isNotEmpty;
@@ -30,6 +42,7 @@ class IngredientFormInput {
     quantityController.dispose();
     unitController.dispose();
     nameController.dispose();
+    prepActionController.dispose();
   }
 }
 
@@ -223,12 +236,17 @@ class _RecipeSubmissionScreenState extends State<RecipeSubmissionScreen> {
       return;
     }
 
-    final validIngredients = _ingredientInputs
+    final validIngredientItems = _ingredientInputs
+        .where((i) => i.isValid)
+        .map((i) => i.toIngredientItem())
+        .toList();
+
+    final validIngredientPairs = _ingredientInputs
         .where((i) => i.isValid)
         .map((i) => i.toIngredientPair())
         .toList();
 
-    if (validIngredients.isEmpty) {
+    if (validIngredientItems.isEmpty) {
       setState(() {
         _validationError = 'Please add at least one ingredient with a name.';
       });
@@ -271,7 +289,8 @@ class _RecipeSubmissionScreenState extends State<RecipeSubmissionScreen> {
           widget.initialRecipe?.time ??
           30,
       description: _descriptionController.text.trim(),
-      ingredients: validIngredients,
+      ingredientItems: validIngredientItems,
+      ingredients: validIngredientPairs,
       instructions: validInstructions,
       isCommunity: true,
       authorName: _authorNameController.text.trim().isEmpty
