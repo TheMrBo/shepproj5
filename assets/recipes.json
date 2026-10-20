@@ -1,0 +1,150 @@
+[
+  {
+    "id": "ramen",
+    "name": "Ramen",
+    "category": "Asian food",
+    "time": 120,
+    "rating": "4.9",
+    "image": "ramen",
+    "ingredients": [
+      [
+        "🍜",
+        "Noodles"
+      ],
+      [
+        "🥚",
+        "Egg"
+      ],
+      [
+        "🧅",
+        "Onion"
+      ],
+      [
+        "🍅",
+        "Tomato"
+      ],
+      [
+        "🧂",
+        "Seasoning"
+      ],
+      [
+        "🥬",
+        "Greens"
+      ]
+    ],
+    "description": "A warming bowl of Japanese-inspired ramen, with springy noodles, a savory broth, and colorful toppings. Comfort food for slow afternoons and cozy evenings.",
+    "steps": [
+      "Simmer your favorite vegetable broth with garlic and ginger until fragrant.",
+      "Cook the noodles according to the package instructions. Boil an egg to your liking.",
+      "Pour the broth over the noodles. Add the egg, vegetables, and your favorite toppings."
+    ]
+  },
+  {
+    "id": "pancakes",
+    "name": "Pancakes",
+    "category": "Breakfast",
+    "time": 50,
+    "rating": "4.6",
+    "image": "pancakes",
+    "ingredients": [
+      [
+        "🌾",
+        "Flour"
+      ],
+      [
+        "🥚",
+        "Egg"
+      ],
+      [
+        "🥛",
+        "Milk"
+      ],
+      [
+        "🧈",
+        "Butter"
+      ],
+      [
+        "🍓",
+        "Berries"
+      ]
+    ],
+    "description": "A fluffy stack of golden pancakes makes any morning feel a little more special. Finish with fresh berries and a drizzle of maple syrup.",
+    "steps": [
+      "Whisk 1 cup flour, 1 tablespoon sugar, and 1 teaspoon baking powder.",
+      "Stir in 1 egg, ¾ cup milk, and 1 tablespoon melted butter.",
+      "Spoon into a warm buttered pan. Flip when bubbles form, then serve with berries."
+    ]
+  },
+  {
+    "id": "salad",
+    "name": "Rainbow salad",
+    "category": "Asian food",
+    "time": 20,
+    "rating": "4.8",
+    "image": "salad",
+    "ingredients": [
+      [
+        "🥬",
+        "Lettuce"
+      ],
+      [
+        "🥕",
+        "Carrot"
+      ],
+      [
+        "🥒",
+        "Cucumber"
+      ],
+      [
+        "🍋",
+        "Lemon"
+      ],
+      [
+        "🥑",
+        "Avocado"
+      ]
+    ],
+    "description": "Fresh, crunchy, and full of color. This easy vegetable bowl brings a bright little break to your day with a zesty sesame dressing.",
+    "steps": [
+      "Wash and chop the lettuce, cucumber, carrot, and avocado.",
+      "Whisk lemon juice with olive oil and a little sesame oil.",
+      "Toss the vegetables with the dressing and serve right away."
+    ]
+  },
+  {
+    "id": "toast",
+    "name": "French toast",
+    "category": "Breakfast",
+    "time": 25,
+    "rating": "4.7",
+    "image": "toast",
+    "ingredients": [
+      [
+        "🍞",
+        "Bread"
+      ],
+      [
+        "🥚",
+        "Egg"
+      ],
+      [
+        "🥛",
+        "Milk"
+      ],
+      [
+        "🧈",
+        "Butter"
+      ],
+      [
+        "🍯",
+        "Honey"
+      ]
+    ],
+    "description": "Crisp edges, a soft middle, and a touch of sweetness. A simple French toast recipe for the kind of breakfast you want to linger over.",
+    "steps": [
+      "Whisk 2 eggs with ½ cup milk and a pinch of cinnamon.",
+      "Dip thick slices of bread into the mixture on both sides.",
+      "Cook in a buttered pan until golden on each side. Finish with honey."
+    ]
+  }
+]
