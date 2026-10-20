@@ -2,15 +2,12 @@ import 'dart:convert';
 import 'recipe.dart';
 import 'recipe_import.dart';
 import 'import_dialog.dart';
-import 'recipe_submission_screen.dart';
-import 'recipe_attribution_legal.dart';
-import 'step_timer_widget.dart';
-import 'ingredient_prep_checklist_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 export 'recipe.dart';
+export 'cook_log_entry.dart';
 
 const coral = Color(0xFFEC4E6E);
 const paper = Color(0xFFFAF9FB);
@@ -39,6 +36,7 @@ class RecipeStore extends ChangeNotifier {
           .toSet();
   late final Set<String> deletedIds =
       (preferences.getStringList('deleted_recipes') ?? <String>[]).toSet();
+  late final List<CookLogEntry> cookLog = _loadCookLog();
   Future<void> _pendingSave = Future.value();
   final RecipeImporter importer;
   RecipeStore(
@@ -77,6 +75,36 @@ class RecipeStore extends ChangeNotifier {
         /* Skip damaged entries */
       }
     }
+  }
+
+  List<CookLogEntry> _loadCookLog() {
+    final entries = <CookLogEntry>[];
+    for (final encoded in preferences.getStringList('cook_log') ?? <String>[]) {
+      try {
+        entries.add(
+          CookLogEntry.fromJson(jsonDecode(encoded) as Map<String, dynamic>),
+        );
+      } catch (_) {
+        /* Skip damaged entries without losing the rest of the log. */
+      }
+    }
+    entries.sort((a, b) => b.cookedAt.compareTo(a.cookedAt));
+    return entries;
+  }
+
+  Future<void> markCooked(String recipeId) async {
+    cookLog.insert(
+      0,
+      CookLogEntry(recipeId: recipeId, cookedAt: DateTime.now()),
+    );
+    final snapshot = cookLog.map((e) => jsonEncode(e.toJson())).toList();
+    notifyListeners();
+    _pendingSave = _pendingSave.catchError((Object _) {}).then((_) async {
+      if (!await preferences.setStringList('cook_log', snapshot)) {
+        throw StateError('Could not save cook history.');
+      }
+    });
+    return _pendingSave;
   }
 
   Future<Recipe> addImported(Recipe recipe) async {
@@ -166,15 +194,18 @@ class RecipeStore extends ChangeNotifier {
     recipes.removeWhere((r) => r.id == id);
     saved.remove(id);
     deletedIds.add(id);
+    cookLog.removeWhere((entry) => entry.recipeId == id);
 
     final savedSnapshot = saved.toList();
     final deletedSnapshot = deletedIds.toList();
+    final cookLogSnapshot = cookLog.map((e) => jsonEncode(e.toJson())).toList();
 
     notifyListeners();
 
     _pendingSave = _pendingSave.catchError((Object _) {}).then((_) async {
       await preferences.setStringList('saved_recipes', savedSnapshot);
       await preferences.setStringList('deleted_recipes', deletedSnapshot);
+      await preferences.setStringList('cook_log', cookLogSnapshot);
 
       final imports = recipes
           .where((r) => r.sourceUrl != null)
@@ -242,9 +273,7 @@ Future<bool> confirmDeleteRecipe(
     await store.deleteRecipe(recipe.id);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('"${recipe.name}" has been deleted.'),
-        ),
+        SnackBar(content: Text('"${recipe.name}" has been deleted.')),
       );
     }
     return true;
@@ -321,9 +350,7 @@ class DeliciousApp extends StatelessWidget {
         ),
       ),
       chipTheme: ChipThemeData(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
@@ -409,11 +436,11 @@ class _KitchenScreenState extends State<KitchenScreen> {
   }
 
   Future<void> openAddCommunityRecipeDialog() async {
-    final recipe = await Navigator.of(context).push<Recipe>(
-      MaterialPageRoute(
-        builder: (_) => RecipeSubmissionScreen(
-          onSave: widget.store.addCommunityRecipe,
-        ),
+    final recipe = await showDialog<Recipe>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => CreateCommunityRecipeDialog(
+        onSave: widget.store.addCommunityRecipe,
       ),
     );
     if (!mounted || recipe == null) {
@@ -472,6 +499,11 @@ class _KitchenScreenState extends State<KitchenScreen> {
                       selectedIcon: Icon(Icons.people, color: coral),
                       label: 'Community',
                     ),
+                    NavigationDestination(
+                      icon: Icon(Icons.history_outlined),
+                      selectedIcon: Icon(Icons.history, color: coral),
+                      label: 'Cook history',
+                    ),
                   ],
                 ),
           body: SafeArea(
@@ -498,7 +530,9 @@ class _KitchenScreenState extends State<KitchenScreen> {
                                   ? 'What sounds delicious?'
                                   : destination == 1
                                   ? 'Your saved recipes'
-                                  : 'Community Kitchen',
+                                  : destination == 2
+                                  ? 'Community Kitchen'
+                                  : 'Your cook history',
                               style: Theme.of(context).textTheme.headlineMedium,
                             ),
                             const SizedBox(height: 28),
@@ -520,198 +554,205 @@ class _KitchenScreenState extends State<KitchenScreen> {
                               ),
                               const SizedBox(height: 30),
                             ],
-                            LayoutBuilder(
-                              key: browseKey,
-                              builder: (context, size) {
-                                final title = Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'FIND YOUR NEXT FAVORITE',
-                                      style: TextStyle(
-                                        fontSize: 9,
-                                        letterSpacing: 1.5,
-                                        color: muted,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      'Explore recipes',
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.titleLarge,
-                                    ),
-                                  ],
-                                );
-                                final search = TextField(
-                                  key: const Key('recipe-search'),
-                                  controller: searchController,
-                                  focusNode: searchFocus,
-                                  onChanged: (value) => setState(
-                                    () => query = value.trim().toLowerCase(),
-                                  ),
-                                  decoration: InputDecoration(
-                                    hintText: 'Search your perfect recipe',
-                                    hintStyle: const TextStyle(fontSize: 12),
-                                    prefixIcon: const Icon(
-                                      Icons.search,
-                                      size: 21,
-                                    ),
-                                    suffixIcon: query.isEmpty
-                                        ? null
-                                        : IconButton(
-                                            tooltip: 'Clear search',
-                                            onPressed: () {
-                                              searchController.clear();
-                                              setState(() => query = '');
-                                            },
-                                            icon: const Icon(
-                                              Icons.close,
-                                              size: 18,
-                                            ),
-                                          ),
-                                  ),
-                                );
-                                return size.maxWidth > 600
-                                    ? Row(
-                                        children: [
-                                          Expanded(child: title),
-                                          SizedBox(width: 300, child: search),
-                                        ],
-                                      )
-                                    : Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          title,
-                                          const SizedBox(height: 18),
-                                          search,
-                                        ],
-                                      );
-                              },
-                            ),
-                            const SizedBox(height: 20),
-                            Wrap(
-                              spacing: 10,
-                              runSpacing: 8,
-                              children:
-                                  [
-                                    'All',
-                                    'Breakfast',
-                                    'Asian food',
-                                    'Community Specials',
-                                    'Imported',
-                                  ]
-                                      .map(
-                                        (value) => ChoiceChip(
-                                          label: Text(value),
-                                          selected: category == value,
-                                          showCheckmark: false,
-                                          selectedColor: coral,
-                                          backgroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(12),
-                                          ),
-                                          labelStyle: TextStyle(
-                                            color: category == value
-                                                ? Colors.white
-                                                : muted,
-                                            fontSize: 12,
-                                          ),
-                                          side: BorderSide(
-                                            color: category == value
-                                                ? coral
-                                                : const Color(0xFFEEE9EF),
-                                          ),
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 13,
-                                            vertical: 8,
-                                          ),
-                                          onSelected: (_) =>
-                                              setState(() => category = value),
-                                        ),
-                                      )
-                                      .toList(),
-                            ),
-                            const SizedBox(height: 26),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    destination == 0
-                                        ? 'Popular right now'
-                                        : 'Your collection',
-                                    style: const TextStyle(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                Text(
-                                  '${visible.length} recipe${visible.length == 1 ? '' : 's'}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: muted,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 16),
-                            if (visible.isEmpty)
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.all(45),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                                child: const Text(
-                                  'No recipes found.\nTry another search or save a recipe to your collection.',
-                                  textAlign: TextAlign.center,
-                                ),
-                              )
-                            else
+                            if (destination == 3) ...[
+                              cookHistorySection(),
+                            ] else ...[
                               LayoutBuilder(
+                                key: browseKey,
                                 builder: (context, size) {
-                                  final columns = size.maxWidth > 850
-                                      ? 4
-                                      : size.maxWidth < 310
-                                      ? 1
-                                      : 2;
-                                  final width =
-                                      (size.maxWidth - (columns - 1) * 16) /
-                                      columns;
-                                  return Wrap(
-                                    spacing: 16,
-                                    runSpacing: 16,
-                                    children: visible
-                                        .map(
-                                          (recipe) => SizedBox(
-                                            width: width,
-                                            child: RecipeCard(
-                                              recipe: recipe,
-                                              saved: widget.store.saved
-                                                  .contains(recipe.id),
-                                              onOpen: () => openRecipe(recipe),
-                                              onSave: () => saveRecipe(
-                                                context,
-                                                widget.store,
-                                                recipe.id,
+                                  final title = Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'FIND YOUR NEXT FAVORITE',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          letterSpacing: 1.5,
+                                          color: muted,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Explore recipes',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleLarge,
+                                      ),
+                                    ],
+                                  );
+                                  final search = TextField(
+                                    key: const Key('recipe-search'),
+                                    controller: searchController,
+                                    focusNode: searchFocus,
+                                    onChanged: (value) => setState(
+                                      () => query = value.trim().toLowerCase(),
+                                    ),
+                                    decoration: InputDecoration(
+                                      hintText: 'Search your perfect recipe',
+                                      hintStyle: const TextStyle(fontSize: 12),
+                                      prefixIcon: const Icon(
+                                        Icons.search,
+                                        size: 21,
+                                      ),
+                                      suffixIcon: query.isEmpty
+                                          ? null
+                                          : IconButton(
+                                              tooltip: 'Clear search',
+                                              onPressed: () {
+                                                searchController.clear();
+                                                setState(() => query = '');
+                                              },
+                                              icon: const Icon(
+                                                Icons.close,
+                                                size: 18,
                                               ),
-                                              onDelete: () =>
-                                                  confirmDeleteRecipe(
-                                                    context,
-                                                    widget.store,
-                                                    recipe,
-                                                  ),
+                                            ),
+                                    ),
+                                  );
+                                  return size.maxWidth > 600
+                                      ? Row(
+                                          children: [
+                                            Expanded(child: title),
+                                            SizedBox(width: 300, child: search),
+                                          ],
+                                        )
+                                      : Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            title,
+                                            const SizedBox(height: 18),
+                                            search,
+                                          ],
+                                        );
+                                },
+                              ),
+                              const SizedBox(height: 20),
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 8,
+                                children:
+                                    [
+                                          'All',
+                                          'Breakfast',
+                                          'Asian food',
+                                          'Community Specials',
+                                          'Imported',
+                                        ]
+                                        .map(
+                                          (value) => ChoiceChip(
+                                            label: Text(value),
+                                            selected: category == value,
+                                            showCheckmark: false,
+                                            selectedColor: coral,
+                                            backgroundColor: Colors.white,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            labelStyle: TextStyle(
+                                              color: category == value
+                                                  ? Colors.white
+                                                  : muted,
+                                              fontSize: 12,
+                                            ),
+                                            side: BorderSide(
+                                              color: category == value
+                                                  ? coral
+                                                  : const Color(0xFFEEE9EF),
+                                            ),
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 13,
+                                              vertical: 8,
+                                            ),
+                                            onSelected: (_) => setState(
+                                              () => category = value,
                                             ),
                                           ),
                                         )
                                         .toList(),
-                                  );
-                                },
                               ),
+                              const SizedBox(height: 26),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      destination == 0
+                                          ? 'Popular right now'
+                                          : 'Your collection',
+                                      style: const TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    '${visible.length} recipe${visible.length == 1 ? '' : 's'}',
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: muted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              if (visible.isEmpty)
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(45),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: const Text(
+                                    'No recipes found.\nTry another search or save a recipe to your collection.',
+                                    textAlign: TextAlign.center,
+                                  ),
+                                )
+                              else
+                                LayoutBuilder(
+                                  builder: (context, size) {
+                                    final columns = size.maxWidth > 850
+                                        ? 4
+                                        : size.maxWidth < 310
+                                        ? 1
+                                        : 2;
+                                    final width =
+                                        (size.maxWidth - (columns - 1) * 16) /
+                                        columns;
+                                    return Wrap(
+                                      spacing: 16,
+                                      runSpacing: 16,
+                                      children: visible
+                                          .map(
+                                            (recipe) => SizedBox(
+                                              width: width,
+                                              child: RecipeCard(
+                                                recipe: recipe,
+                                                saved: widget.store.saved
+                                                    .contains(recipe.id),
+                                                onOpen: () =>
+                                                    openRecipe(recipe),
+                                                onSave: () => saveRecipe(
+                                                  context,
+                                                  widget.store,
+                                                  recipe.id,
+                                                ),
+                                                onDelete: () =>
+                                                    confirmDeleteRecipe(
+                                                      context,
+                                                      widget.store,
+                                                      recipe,
+                                                    ),
+                                              ),
+                                            ),
+                                          )
+                                          .toList(),
+                                    );
+                                  },
+                                ),
+                            ],
                             const SizedBox(height: 28),
                             const Center(
                               child: Text(
@@ -770,7 +811,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
             style: TextStyle(fontSize: 9, letterSpacing: 1.8, color: muted),
           ),
         ),
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Material(
@@ -788,7 +829,9 @@ class _KitchenScreenState extends State<KitchenScreen> {
                       ? Icons.home_outlined
                       : i == 1
                       ? Icons.favorite_border
-                      : Icons.people_outline,
+                      : i == 2
+                      ? Icons.people_outline
+                      : Icons.history_outlined,
                   size: 23,
                 ),
                 title: Text(
@@ -796,7 +839,9 @@ class _KitchenScreenState extends State<KitchenScreen> {
                       ? 'Discover'
                       : i == 1
                       ? 'Saved recipes'
-                      : 'Community',
+                      : i == 2
+                      ? 'Community'
+                      : 'Cook history',
                   style: const TextStyle(fontSize: 12),
                 ),
                 trailing: i == 1
@@ -807,6 +852,11 @@ class _KitchenScreenState extends State<KitchenScreen> {
                     : i == 2
                     ? Text(
                         '${widget.store.recipes.where((r) => r.isCommunity).length}',
+                        style: const TextStyle(fontSize: 11),
+                      )
+                    : i == 3
+                    ? Text(
+                        '${widget.store.cookLog.length}',
                         style: const TextStyle(fontSize: 11),
                       )
                     : null,
@@ -865,6 +915,136 @@ class _KitchenScreenState extends State<KitchenScreen> {
       ],
     ),
   );
+
+  static const _monthNames = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+
+  String formatCookedDate(DateTime date) =>
+      '${_monthNames[date.month - 1]} ${date.day}, ${date.year}';
+
+  Widget cookHistorySection() {
+    final entries = widget.store.cookLog
+        .where(
+          (entry) => widget.store.recipes.any((r) => r.id == entry.recipeId),
+        )
+        .toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'WHAT YOU\'VE MADE',
+          style: TextStyle(fontSize: 9, letterSpacing: 1.5, color: muted),
+        ),
+        const SizedBox(height: 6),
+        Text('Cook history', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Recently cooked',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+              ),
+            ),
+            Text(
+              '${entries.length} ${entries.length == 1 ? 'entry' : 'entries'}',
+              style: const TextStyle(fontSize: 11, color: muted),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (entries.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(45),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Text(
+              "You haven't marked anything as cooked yet.\n"
+              "Open a recipe and tap \"Mark as cooked\" once you've made it.",
+              textAlign: TextAlign.center,
+            ),
+          )
+        else
+          Column(
+            children: entries.map((entry) {
+              final recipe = widget.store.recipes.firstWhere(
+                (r) => r.id == entry.recipeId,
+              );
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () => openRecipe(recipe),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: RecipeArtwork(
+                              recipe: recipe,
+                              height: 56,
+                              width: 56,
+                              fit: BoxFit.cover,
+                              semanticLabel: recipe.name,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  recipe.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Cooked on ${formatCookedDate(entry.cookedAt)}',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: muted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.chevron_right,
+                            color: muted,
+                            size: 20,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+      ],
+    );
+  }
 }
 
 class WelcomeBanner extends StatelessWidget {
@@ -1033,11 +1213,7 @@ class RecipeCard extends StatelessWidget {
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 tooltip: 'Delete ${recipe.name}',
                 onPressed: onDelete,
-                icon: const Icon(
-                  Icons.delete_outline,
-                  size: 18,
-                  color: muted,
-                ),
+                icon: const Icon(Icons.delete_outline, size: 18, color: muted),
               ),
               IconButton(
                 padding: EdgeInsets.zero,
@@ -1459,11 +1635,7 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                         children: [
                           const Row(
                             children: [
-                              Icon(
-                                Icons.star_rounded,
-                                color: coral,
-                                size: 20,
-                              ),
+                              Icon(Icons.star_rounded, color: coral, size: 20),
                               SizedBox(width: 6),
                               Text(
                                 'Rate this Recipe',
@@ -1486,7 +1658,10 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                             runSpacing: 8,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              const Text('Your Rating: ', style: TextStyle(fontSize: 12)),
+                              const Text(
+                                'Your Rating: ',
+                                style: TextStyle(fontSize: 12),
+                              ),
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: List.generate(5, (index) {
@@ -1507,8 +1682,8 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                                     tooltip: 'Rate $starValue Stars',
                                     onPressed: () async {
                                       setState(
-                                        () => userSelectedStars =
-                                            starValue.toDouble(),
+                                        () => userSelectedStars = starValue
+                                            .toDouble(),
                                       );
                                       await widget.store.rateRecipe(
                                         recipe.id,
@@ -1542,6 +1717,26 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                         child: Text(
                           showSteps ? 'Back to details' : "Let's cook",
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          await widget.store.markCooked(recipe.id);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  "Added '${recipe.name}' to your cook history.",
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text('Mark as cooked'),
                       ),
                     ),
                     const SizedBox(height: 15),
@@ -1640,11 +1835,7 @@ class CommunityBanner extends StatelessWidget {
           children: [
             const Row(
               children: [
-                Icon(
-                  Icons.people,
-                  color: coral,
-                  size: 20,
-                ),
+                Icon(Icons.people, color: coral, size: 20),
                 SizedBox(width: 6),
                 Text(
                   "COMMUNITY KITCHEN",
@@ -1755,9 +1946,7 @@ class _CreateCommunityRecipeDialogState
               ['•', 'Special ingredients'],
             ]
           : rawIngredients,
-      'steps': rawSteps.isEmpty
-          ? ['Cook with passion and enjoy!']
-          : rawSteps,
+      'steps': rawSteps.isEmpty ? ['Cook with passion and enjoy!'] : rawSteps,
       'rating': '5.0',
       'ratingCount': 1,
       'ratingSum': 5.0,
@@ -1803,15 +1992,14 @@ class _CreateCommunityRecipeDialogState
                   labelText: 'Recipe Title',
                   hintText: 'e.g., Homemade Garlic Butter Pasta',
                 ),
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Please enter a title' : null,
+                validator: (v) => v == null || v.trim().isEmpty
+                    ? 'Please enter a title'
+                    : null,
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: category,
-                decoration: const InputDecoration(
-                  labelText: 'Category',
-                ),
+                decoration: const InputDecoration(labelText: 'Category'),
                 items: categories
                     .map((c) => DropdownMenuItem(value: c, child: Text(c)))
                     .toList(),
@@ -1825,10 +2013,9 @@ class _CreateCommunityRecipeDialogState
                   labelText: 'Time (minutes)',
                   hintText: '30',
                 ),
-                validator: (v) =>
-                    v == null || int.tryParse(v.trim()) == null
-                        ? 'Enter time in minutes'
-                        : null,
+                validator: (v) => v == null || int.tryParse(v.trim()) == null
+                    ? 'Enter time in minutes'
+                    : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -1845,8 +2032,7 @@ class _CreateCommunityRecipeDialogState
                 maxLines: 3,
                 decoration: const InputDecoration(
                   labelText: 'Ingredients (one per line)',
-                  hintText:
-                      "1/2 lb Pasta\n3 cloves Garlic\n2 tbsp Butter",
+                  hintText: "1/2 lb Pasta\n3 cloves Garlic\n2 tbsp Butter",
                 ),
               ),
               const SizedBox(height: 12),
