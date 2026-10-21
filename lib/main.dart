@@ -2,10 +2,11 @@ import 'dart:convert';
 import 'recipe.dart';
 import 'recipe_import.dart';
 import 'import_dialog.dart';
-export 'recipe.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+export 'recipe.dart';
 
 const coral = Color(0xFFEC4E6E);
 const paper = Color(0xFFFAF9FB);
@@ -32,6 +33,8 @@ class RecipeStore extends ChangeNotifier {
   late final Set<String> saved =
       (preferences.getStringList('saved_recipes') ?? ['ramen', 'salad'])
           .toSet();
+  late final Set<String> deletedIds =
+      (preferences.getStringList('deleted_recipes') ?? <String>[]).toSet();
   Future<void> _pendingSave = Future.value();
   final RecipeImporter importer;
   RecipeStore(
@@ -40,6 +43,7 @@ class RecipeStore extends ChangeNotifier {
     RecipeImporter? importer,
   }) : recipes = List.of(initialRecipes),
        importer = importer ?? RecipeImporter() {
+    recipes.removeWhere((r) => deletedIds.contains(r.id));
     for (final encoded
         in preferences.getStringList('imported_recipes') ?? <String>[]) {
       try {
@@ -47,11 +51,26 @@ class RecipeStore extends ChangeNotifier {
           jsonDecode(encoded) as Map<String, dynamic>,
         );
         if (recipe.sourceUrl != null &&
+            !deletedIds.contains(recipe.id) &&
             !recipes.any((r) => r.id == recipe.id)) {
           recipes.add(recipe);
         }
       } catch (_) {
         /* Skip damaged entries without losing the rest of the library. */
+      }
+    }
+    for (final encoded
+        in preferences.getStringList('community_recipes') ?? <String>[]) {
+      try {
+        final recipe = Recipe.fromJson(
+          jsonDecode(encoded) as Map<String, dynamic>,
+        );
+        if (!deletedIds.contains(recipe.id) &&
+            !recipes.any((r) => r.id == recipe.id)) {
+          recipes.add(recipe);
+        }
+      } catch (_) {
+        /* Skip damaged entries */
       }
     }
   }
@@ -85,6 +104,47 @@ class RecipeStore extends ChangeNotifier {
     return result;
   }
 
+  Future<Recipe> addCommunityRecipe(Recipe recipe) async {
+    recipes.add(recipe);
+    notifyListeners();
+    _pendingSave = _pendingSave.catchError((Object _) {}).then((_) async {
+      final communityList = recipes
+          .where((r) => r.isCommunity)
+          .map((r) => jsonEncode(r.toJson()))
+          .toList();
+      await preferences.setStringList('community_recipes', communityList);
+    });
+    await _pendingSave;
+    return recipe;
+  }
+
+  Future<void> rateRecipe(String recipeId, double ratingValue) async {
+    final index = recipes.indexWhere((r) => r.id == recipeId);
+    if (index >= 0) {
+      final current = recipes[index];
+      final newCount = current.ratingCount + 1;
+      final newSum = current.ratingSum + ratingValue;
+      final newAvg = (newSum / newCount).toStringAsFixed(1);
+
+      final updated = current.copyWith(
+        rating: newAvg,
+        ratingCount: newCount,
+        ratingSum: newSum,
+      );
+      recipes[index] = updated;
+      notifyListeners();
+
+      _pendingSave = _pendingSave.catchError((Object _) {}).then((_) async {
+        final communityList = recipes
+            .where((r) => r.isCommunity)
+            .map((r) => jsonEncode(r.toJson()))
+            .toList();
+        await preferences.setStringList('community_recipes', communityList);
+      });
+      await _pendingSave;
+    }
+  }
+
   Future<void> toggle(String id) {
     saved.contains(id) ? saved.remove(id) : saved.add(id);
     final snapshot = saved.toList();
@@ -94,6 +154,35 @@ class RecipeStore extends ChangeNotifier {
       if (!await preferences.setStringList('saved_recipes', snapshot)) {
         throw StateError('Could not save favorites.');
       }
+    });
+    return _pendingSave;
+  }
+
+  Future<void> deleteRecipe(String id) async {
+    recipes.removeWhere((r) => r.id == id);
+    saved.remove(id);
+    deletedIds.add(id);
+
+    final savedSnapshot = saved.toList();
+    final deletedSnapshot = deletedIds.toList();
+
+    notifyListeners();
+
+    _pendingSave = _pendingSave.catchError((Object _) {}).then((_) async {
+      await preferences.setStringList('saved_recipes', savedSnapshot);
+      await preferences.setStringList('deleted_recipes', deletedSnapshot);
+
+      final imports = recipes
+          .where((r) => r.sourceUrl != null)
+          .map((r) => jsonEncode(r.toJson()))
+          .toList();
+      await preferences.setStringList('imported_recipes', imports);
+
+      final communityList = recipes
+          .where((r) => r.isCommunity)
+          .map((r) => jsonEncode(r.toJson()))
+          .toList();
+      await preferences.setStringList('community_recipes', communityList);
     });
     return _pendingSave;
   }
@@ -117,6 +206,46 @@ Future<void> saveRecipe(
       );
     }
   }
+}
+
+Future<bool> confirmDeleteRecipe(
+  BuildContext context,
+  RecipeStore store,
+  Recipe recipe,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Delete Recipe'),
+      content: Text('Are you sure you want to delete "${recipe.name}"?'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Delete'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmed == true) {
+    await store.deleteRecipe(recipe.id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"${recipe.name}" has been deleted.'),
+        ),
+      );
+    }
+    return true;
+  }
+  return false;
 }
 
 class DeliciousApp extends StatelessWidget {
@@ -154,6 +283,42 @@ class DeliciousApp extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          minimumSize: const Size(0, 46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          minimumSize: const Size(0, 46),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: SegmentedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -239,6 +404,26 @@ class _KitchenScreenState extends State<KitchenScreen> {
     openRecipe(recipe);
   }
 
+  Future<void> openAddCommunityRecipeDialog() async {
+    final recipe = await showDialog<Recipe>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => CreateCommunityRecipeDialog(
+        onSave: widget.store.addCommunityRecipe,
+      ),
+    );
+    if (!mounted || recipe == null) {
+      return;
+    }
+    searchController.clear();
+    setState(() {
+      destination = 2;
+      category = 'All';
+      query = '';
+    });
+    openRecipe(recipe);
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
@@ -248,7 +433,9 @@ class _KitchenScreenState extends State<KitchenScreen> {
         final visible = widget.store.recipes
             .where(
               (r) =>
-                  (destination == 0 || widget.store.saved.contains(r.id)) &&
+                  (destination == 0 ||
+                      (destination == 1 && widget.store.saved.contains(r.id)) ||
+                      (destination == 2 && r.isCommunity)) &&
                   (category == 'All' || category == r.category) &&
                   (r.name.toLowerCase().contains(query) ||
                       r.ingredients.any(
@@ -276,6 +463,11 @@ class _KitchenScreenState extends State<KitchenScreen> {
                       selectedIcon: Icon(Icons.favorite, color: coral),
                       label: 'Saved recipes',
                     ),
+                    NavigationDestination(
+                      icon: Icon(Icons.people_outline),
+                      selectedIcon: Icon(Icons.people, color: coral),
+                      label: 'Community',
+                    ),
                   ],
                 ),
           body: SafeArea(
@@ -300,7 +492,9 @@ class _KitchenScreenState extends State<KitchenScreen> {
                             Text(
                               destination == 0
                                   ? 'What sounds delicious?'
-                                  : 'Your saved recipes',
+                                  : destination == 1
+                                  ? 'Your saved recipes'
+                                  : 'Community Kitchen',
                               style: Theme.of(context).textTheme.headlineMedium,
                             ),
                             const SizedBox(height: 28),
@@ -314,6 +508,11 @@ class _KitchenScreenState extends State<KitchenScreen> {
                                   );
                                   searchFocus.requestFocus();
                                 },
+                              ),
+                              const SizedBox(height: 30),
+                            ] else if (destination == 2) ...[
+                              CommunityBanner(
+                                onAddRecipe: openAddCommunityRecipeDialog,
                               ),
                               const SizedBox(height: 30),
                             ],
@@ -392,7 +591,13 @@ class _KitchenScreenState extends State<KitchenScreen> {
                               spacing: 10,
                               runSpacing: 8,
                               children:
-                                  ['All', 'Breakfast', 'Asian food', 'Imported']
+                                  [
+                                    'All',
+                                    'Breakfast',
+                                    'Asian food',
+                                    'Community Specials',
+                                    'Imported',
+                                  ]
                                       .map(
                                         (value) => ChoiceChip(
                                           label: Text(value),
@@ -400,6 +605,10 @@ class _KitchenScreenState extends State<KitchenScreen> {
                                           showCheckmark: false,
                                           selectedColor: coral,
                                           backgroundColor: Colors.white,
+                                          shape: RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.circular(12),
+                                          ),
                                           labelStyle: TextStyle(
                                             color: category == value
                                                 ? Colors.white
@@ -486,6 +695,12 @@ class _KitchenScreenState extends State<KitchenScreen> {
                                                 widget.store,
                                                 recipe.id,
                                               ),
+                                              onDelete: () =>
+                                                  confirmDeleteRecipe(
+                                                    context,
+                                                    widget.store,
+                                                    recipe,
+                                                  ),
                                             ),
                                           ),
                                         )
@@ -551,7 +766,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
             style: TextStyle(fontSize: 9, letterSpacing: 1.8, color: muted),
           ),
         ),
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < 3; i++)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: Material(
@@ -565,16 +780,29 @@ class _KitchenScreenState extends State<KitchenScreen> {
                 selectedColor: coral,
                 selectedTileColor: const Color(0xFFFFF0F3),
                 leading: Icon(
-                  i == 0 ? Icons.home_outlined : Icons.favorite_border,
+                  i == 0
+                      ? Icons.home_outlined
+                      : i == 1
+                      ? Icons.favorite_border
+                      : Icons.people_outline,
                   size: 23,
                 ),
                 title: Text(
-                  i == 0 ? 'Discover' : 'Saved recipes',
+                  i == 0
+                      ? 'Discover'
+                      : i == 1
+                      ? 'Saved recipes'
+                      : 'Community',
                   style: const TextStyle(fontSize: 12),
                 ),
                 trailing: i == 1
                     ? Text(
                         '${widget.store.saved.length}',
+                        style: const TextStyle(fontSize: 11),
+                      )
+                    : i == 2
+                    ? Text(
+                        '${widget.store.recipes.where((r) => r.isCommunity).length}',
                         style: const TextStyle(fontSize: 11),
                       )
                     : null,
@@ -724,13 +952,14 @@ class WelcomeBanner extends StatelessWidget {
 class RecipeCard extends StatelessWidget {
   final Recipe recipe;
   final bool saved;
-  final VoidCallback onOpen, onSave;
+  final VoidCallback onOpen, onSave, onDelete;
   const RecipeCard({
     super.key,
     required this.recipe,
     required this.saved,
     required this.onOpen,
     required this.onSave,
+    required this.onDelete,
   });
   @override
   Widget build(BuildContext context) => Material(
@@ -762,6 +991,8 @@ class RecipeCard extends StatelessWidget {
                   const SizedBox(height: 18),
                   Text(
                     recipe.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -777,7 +1008,7 @@ class RecipeCard extends StatelessWidget {
                         style: const TextStyle(fontSize: 11, color: muted),
                       ),
                       Text(
-                        'â˜… ${recipe.rating}',
+                        '★ ${recipe.rating}',
                         style: const TextStyle(fontSize: 11, color: coral),
                       ),
                     ],
@@ -788,16 +1019,34 @@ class RecipeCard extends StatelessWidget {
           ),
         ),
         Positioned(
-          top: 2,
-          right: 2,
-          child: IconButton(
-            tooltip: '${saved ? 'Unsave' : 'Save'} ${recipe.name}',
-            onPressed: onSave,
-            icon: Icon(
-              saved ? Icons.favorite : Icons.favorite_border,
-              size: 21,
-              color: saved ? coral : muted,
-            ),
+          top: 4,
+          right: 4,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                tooltip: 'Delete ${recipe.name}',
+                onPressed: onDelete,
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 18,
+                  color: muted,
+                ),
+              ),
+              IconButton(
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                tooltip: '${saved ? 'Unsave' : 'Save'} ${recipe.name}',
+                onPressed: onSave,
+                icon: Icon(
+                  saved ? Icons.favorite : Icons.favorite_border,
+                  size: 18,
+                  color: saved ? coral : muted,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -822,6 +1071,7 @@ class RecipeDetails extends StatefulWidget {
 class _RecipeDetailsState extends State<RecipeDetails> {
   bool showSteps = false;
   int stepIndex = 0;
+  double userSelectedStars = 5.0;
 
   Widget stepPage(Recipe recipe) => Column(
     children: [
@@ -931,6 +1181,21 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                 color: coral,
               ),
             ),
+            IconButton(
+              tooltip: 'Delete ${recipe.name}',
+              icon: const Icon(Icons.delete_outline, color: muted),
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                final deleted = await confirmDeleteRecipe(
+                  context,
+                  widget.store,
+                  recipe,
+                );
+                if (deleted && navigator.canPop()) {
+                  navigator.pop();
+                }
+              },
+            ),
             const SizedBox(width: 10),
           ],
         ),
@@ -954,14 +1219,21 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                       style: Theme.of(context).textTheme.headlineMedium,
                     ),
                     const SizedBox(height: 8),
-                    Row(
+                    Wrap(
+                      spacing: 20,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        const Icon(Icons.schedule, size: 15, color: muted),
-                        const SizedBox(width: 5),
-                        Text(recipe.timeLabel),
-                        const SizedBox(width: 20),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.schedule, size: 15, color: muted),
+                            const SizedBox(width: 5),
+                            Text(recipe.timeLabel),
+                          ],
+                        ),
                         Text(
-                          'â˜… ${recipe.rating}',
+                          '★ ${recipe.rating}',
                           style: const TextStyle(color: coral),
                         ),
                       ],
@@ -1012,14 +1284,16 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                           .toList(),
                     ),
                     const SizedBox(height: 25),
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(value: false, label: Text('Details')),
-                        ButtonSegment(value: true, label: Text('Recipe')),
-                      ],
-                      selected: {showSteps},
-                      onSelectionChanged: (value) =>
-                          setState(() => showSteps = value.single),
+                    Center(
+                      child: SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(value: false, label: Text('Details')),
+                          ButtonSegment(value: true, label: Text('Recipe')),
+                        ],
+                        selected: {showSteps},
+                        onSelectionChanged: (value) =>
+                            setState(() => showSteps = value.single),
+                      ),
                     ),
                     const SizedBox(height: 20),
                     Text(recipe.description),
@@ -1031,6 +1305,94 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                           style: const TextStyle(fontWeight: FontWeight.w600),
                         ),
                       ),
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFAF7F8),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFEEE9EF)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(
+                                Icons.star_rounded,
+                                color: coral,
+                                size: 20,
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'Rate this Recipe',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  color: Color(0xFF43333E),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Current Score: ${recipe.rating} ★ (${recipe.ratingCount} ${recipe.ratingCount == 1 ? 'rating' : 'ratings'})',
+                            style: const TextStyle(fontSize: 11, color: muted),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              const Text('Your Rating: ', style: TextStyle(fontSize: 12)),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: List.generate(5, (index) {
+                                  final starValue = index + 1;
+                                  return IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                      minWidth: 28,
+                                      minHeight: 28,
+                                    ),
+                                    icon: Icon(
+                                      starValue <= userSelectedStars
+                                          ? Icons.star_rounded
+                                          : Icons.star_outline_rounded,
+                                      color: coral,
+                                      size: 24,
+                                    ),
+                                    tooltip: 'Rate $starValue Stars',
+                                    onPressed: () async {
+                                      setState(
+                                        () => userSelectedStars =
+                                            starValue.toDouble(),
+                                      );
+                                      await widget.store.rateRecipe(
+                                        recipe.id,
+                                        starValue.toDouble(),
+                                      );
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              'Thanks for rating "${recipe.name}" $starValue stars!',
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
+                                  );
+                                }),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 22),
                     SizedBox(
                       width: double.infinity,
@@ -1083,9 +1445,9 @@ class RecipeArtwork extends StatelessWidget {
       child: const Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.restaurant_menu, size: 64, color: coral),
-          SizedBox(height: 12),
-          Text('No photo available'),
+          Icon(Icons.restaurant_menu, size: 40, color: coral),
+          SizedBox(height: 6),
+          Text('No photo available', style: TextStyle(fontSize: 11)),
         ],
       ),
     );
@@ -1111,4 +1473,266 @@ class RecipeArtwork extends StatelessWidget {
       errorBuilder: (_, error, stack) => placeholder(),
     );
   }
+}
+
+class CommunityBanner extends StatelessWidget {
+  final VoidCallback onAddRecipe;
+  const CommunityBanner({super.key, required this.onAddRecipe});
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(23),
+    child: Container(
+      width: double.infinity,
+      color: const Color(0xFFFFF0F3),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(
+                  Icons.people,
+                  color: coral,
+                  size: 20,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  "COMMUNITY KITCHEN",
+                  style: TextStyle(
+                    fontSize: 10,
+                    letterSpacing: 1.5,
+                    fontWeight: FontWeight.bold,
+                    color: coral,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Recipes shared by food lovers,\nfor everyone.',
+              style: TextStyle(
+                fontSize: 26,
+                height: 1.25,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -.8,
+                color: Color(0xFF43333E),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'Share your homemade creations, family recipes, or favorite meals. Rate and support dishes from others!',
+              style: TextStyle(fontSize: 12, color: muted),
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: onAddRecipe,
+              icon: const Icon(Icons.add, size: 20),
+              label: const Text('Upload a Recipe'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class CreateCommunityRecipeDialog extends StatefulWidget {
+  final Future<Recipe> Function(Recipe) onSave;
+  const CreateCommunityRecipeDialog({super.key, required this.onSave});
+
+  @override
+  State<CreateCommunityRecipeDialog> createState() =>
+      _CreateCommunityRecipeDialogState();
+}
+
+class _CreateCommunityRecipeDialogState
+    extends State<CreateCommunityRecipeDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final nameController = TextEditingController();
+  final timeController = TextEditingController(text: '30');
+  final descController = TextEditingController();
+  final ingredientsController = TextEditingController();
+  final stepsController = TextEditingController();
+  final imageController = TextEditingController();
+  String category = 'Community Specials';
+  bool busy = false;
+
+  final categories = [
+    'Community Specials',
+    'Home Cooking',
+    'Breakfast',
+    'Asian food',
+    'Desserts',
+    'Quick & Easy',
+  ];
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    timeController.dispose();
+    descController.dispose();
+    ingredientsController.dispose();
+    stepsController.dispose();
+    imageController.dispose();
+    super.dispose();
+  }
+
+  Future<void> submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => busy = true);
+
+    final rawIngredients = ingredientsController.text
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .map((s) => ['•', s])
+        .toList();
+
+    final rawSteps = stepsController.text
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+
+    final recipe = Recipe.fromJson({
+      'id': 'community:${DateTime.now().millisecondsSinceEpoch}',
+      'name': nameController.text.trim(),
+      'category': category,
+      'time': int.tryParse(timeController.text.trim()) ?? 30,
+      'description': descController.text.trim(),
+      'ingredients': rawIngredients.isEmpty
+          ? [
+              ['•', 'Special ingredients'],
+            ]
+          : rawIngredients,
+      'steps': rawSteps.isEmpty
+          ? ['Cook with passion and enjoy!']
+          : rawSteps,
+      'rating': '5.0',
+      'ratingCount': 1,
+      'ratingSum': 5.0,
+      'image': imageController.text.trim().isEmpty
+          ? 'assets/welcome.webp'
+          : imageController.text.trim(),
+      'isCommunity': true,
+    });
+
+    try {
+      final saved = await widget.onSave(recipe);
+      if (mounted) {
+        Navigator.of(context).pop(saved);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => busy = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Row(
+      children: [
+        Icon(Icons.people, color: coral),
+        SizedBox(width: 8),
+        Text('Upload a Recipe'),
+      ],
+    ),
+    content: SizedBox(
+      width: 500,
+      child: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextFormField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Recipe Title',
+                  hintText: 'e.g., Homemade Garlic Butter Pasta',
+                ),
+                validator: (v) =>
+                    v == null || v.trim().isEmpty ? 'Please enter a title' : null,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: category,
+                decoration: const InputDecoration(
+                  labelText: 'Category',
+                ),
+                items: categories
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
+                onChanged: (v) => setState(() => category = v ?? category),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: timeController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Time (minutes)',
+                  hintText: '30',
+                ),
+                validator: (v) =>
+                    v == null || int.tryParse(v.trim()) == null
+                        ? 'Enter time in minutes'
+                        : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: descController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Description / Story',
+                  hintText: 'Tell us what makes this recipe special...',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: ingredientsController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Ingredients (one per line)',
+                  hintText:
+                      "1/2 lb Pasta\n3 cloves Garlic\n2 tbsp Butter",
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: stepsController,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Cooking Steps (one per line)',
+                  hintText:
+                      "Boil pasta until al dente.\nSauté garlic in butter.\nToss pasta and serve!",
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: imageController,
+                decoration: const InputDecoration(
+                  labelText: 'Image URL (optional)',
+                  hintText: 'https://example.com/photo.jpg',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: busy ? null : () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: busy ? null : submit,
+        child: const Text('Upload Recipe'),
+      ),
+    ],
+  );
 }
