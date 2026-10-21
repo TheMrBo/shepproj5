@@ -7,6 +7,7 @@ import 'recipe_attribution_legal.dart';
 import 'step_timer_widget.dart';
 import 'ingredient_prep_checklist_widget.dart';
 import 'cook_log_entry.dart';
+import 'pantry_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -444,6 +445,16 @@ class _KitchenScreenState extends State<KitchenScreen> {
     openRecipe(recipe);
   }
 
+  Future<void> openPantry() async {
+    final recipe = await Navigator.of(context).push<Recipe>(
+      MaterialPageRoute(builder: (_) => PantryScreen(
+        recipes: widget.store.recipes,
+        preferences: widget.store.preferences,
+      )),
+    );
+    if (mounted && recipe != null) openRecipe(recipe);
+  }
+
   Future<void> openAddCommunityRecipeDialog() async {
     final recipe = await Navigator.of(context).push<Recipe>(
       MaterialPageRoute(
@@ -546,6 +557,12 @@ class _KitchenScreenState extends State<KitchenScreen> {
                             ),
                             const SizedBox(height: 28),
                             if (destination == 0) ...[
+                              OutlinedButton.icon(
+                                onPressed: openPantry,
+                                icon: const Icon(Icons.kitchen_outlined),
+                                label: const Text('Cook with what I have'),
+                              ),
+                              const SizedBox(height: 16),
                               WelcomeBanner(
                                 onImport: importRecipe,
                                 onExplore: () {
