@@ -1,4 +1,8 @@
 import 'dart:convert';
+import 'recipe.dart';
+import 'recipe_import.dart';
+import 'import_dialog.dart';
+export 'recipe.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,25 +26,6 @@ Future<List<Recipe>> loadRecipes() async {
       .toList();
 }
 
-class Recipe {
-  final String id, name, category, image, rating, description;
-  final int time;
-  final List<List<String>> ingredients;
-  final List<String> steps;
-  Recipe.fromJson(Map<String, dynamic> json)
-    : id = json['id'] as String,
-      name = json['name'] as String,
-      category = json['category'] as String,
-      image = 'assets/${json['image']}.webp',
-      rating = json['rating'] as String,
-      description = json['description'] as String,
-      time = json['time'] as int,
-      ingredients = (json['ingredients'] as List)
-          .map((e) => List<String>.from(e as List))
-          .toList(),
-      steps = List<String>.from(json['steps'] as List);
-}
-
 class RecipeStore extends ChangeNotifier {
   final List<Recipe> recipes;
   final SharedPreferences preferences;
@@ -48,7 +33,58 @@ class RecipeStore extends ChangeNotifier {
       (preferences.getStringList('saved_recipes') ?? ['ramen', 'salad'])
           .toSet();
   Future<void> _pendingSave = Future.value();
-  RecipeStore(this.recipes, this.preferences);
+  final RecipeImporter importer;
+  RecipeStore(
+    List<Recipe> initialRecipes,
+    this.preferences, {
+    RecipeImporter? importer,
+  }) : recipes = List.of(initialRecipes),
+       importer = importer ?? RecipeImporter() {
+    for (final encoded
+        in preferences.getStringList('imported_recipes') ?? <String>[]) {
+      try {
+        final recipe = Recipe.fromJson(
+          jsonDecode(encoded) as Map<String, dynamic>,
+        );
+        if (recipe.sourceUrl != null &&
+            !recipes.any((r) => r.id == recipe.id)) {
+          recipes.add(recipe);
+        }
+      } catch (_) {
+        /* Skip damaged entries without losing the rest of the library. */
+      }
+    }
+  }
+
+  Future<Recipe> addImported(Recipe recipe) async {
+    late Recipe result;
+    final operation = _pendingSave.catchError((Object _) {}).then((_) async {
+      final index = recipes.indexWhere((r) => r.sourceUrl == recipe.sourceUrl);
+      final imports = [
+        ...recipes.where(
+          (r) => r.sourceUrl != null && r.sourceUrl != recipe.sourceUrl,
+        ),
+        recipe,
+      ];
+      if (!await preferences.setStringList(
+        'imported_recipes',
+        imports.map((r) => jsonEncode(r.toJson())).toList(),
+      )) {
+        throw StateError('Could not save the imported recipe.');
+      }
+      if (index < 0) {
+        recipes.add(recipe);
+      } else {
+        recipes[index] = recipe;
+      }
+      result = recipe;
+      notifyListeners();
+    });
+    _pendingSave = operation;
+    await operation;
+    return result;
+  }
+
   Future<void> toggle(String id) {
     saved.contains(id) ? saved.remove(id) : saved.add(id);
     final snapshot = saved.toList();
@@ -182,6 +218,27 @@ class _KitchenScreenState extends State<KitchenScreen> {
     }
   }
 
+  Future<void> importRecipe() async {
+    final recipe = await showDialog<Recipe>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ImportRecipeDialog(
+        importer: widget.store.importer,
+        onSave: widget.store.addImported,
+      ),
+    );
+    if (!mounted || recipe == null) {
+      return;
+    }
+    searchController.clear();
+    setState(() {
+      destination = 0;
+      category = 'All';
+      query = '';
+    });
+    openRecipe(recipe);
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
@@ -249,6 +306,7 @@ class _KitchenScreenState extends State<KitchenScreen> {
                             const SizedBox(height: 28),
                             if (destination == 0) ...[
                               WelcomeBanner(
+                                onImport: importRecipe,
                                 onExplore: () {
                                   Scrollable.ensureVisible(
                                     browseKey.currentContext!,
@@ -333,34 +391,35 @@ class _KitchenScreenState extends State<KitchenScreen> {
                             Wrap(
                               spacing: 10,
                               runSpacing: 8,
-                              children: ['All', 'Breakfast', 'Asian food']
-                                  .map(
-                                    (value) => ChoiceChip(
-                                      label: Text(value),
-                                      selected: category == value,
-                                      showCheckmark: false,
-                                      selectedColor: coral,
-                                      backgroundColor: Colors.white,
-                                      labelStyle: TextStyle(
-                                        color: category == value
-                                            ? Colors.white
-                                            : muted,
-                                        fontSize: 12,
-                                      ),
-                                      side: BorderSide(
-                                        color: category == value
-                                            ? coral
-                                            : const Color(0xFFEEE9EF),
-                                      ),
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 13,
-                                        vertical: 8,
-                                      ),
-                                      onSelected: (_) =>
-                                          setState(() => category = value),
-                                    ),
-                                  )
-                                  .toList(),
+                              children:
+                                  ['All', 'Breakfast', 'Asian food', 'Imported']
+                                      .map(
+                                        (value) => ChoiceChip(
+                                          label: Text(value),
+                                          selected: category == value,
+                                          showCheckmark: false,
+                                          selectedColor: coral,
+                                          backgroundColor: Colors.white,
+                                          labelStyle: TextStyle(
+                                            color: category == value
+                                                ? Colors.white
+                                                : muted,
+                                            fontSize: 12,
+                                          ),
+                                          side: BorderSide(
+                                            color: category == value
+                                                ? coral
+                                                : const Color(0xFFEEE9EF),
+                                          ),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 13,
+                                            vertical: 8,
+                                          ),
+                                          onSelected: (_) =>
+                                              setState(() => category = value),
+                                        ),
+                                      )
+                                      .toList(),
                             ),
                             const SizedBox(height: 26),
                             Row(
@@ -577,8 +636,12 @@ class _KitchenScreenState extends State<KitchenScreen> {
 }
 
 class WelcomeBanner extends StatelessWidget {
-  final VoidCallback onExplore;
-  const WelcomeBanner({super.key, required this.onExplore});
+  final VoidCallback onExplore, onImport;
+  const WelcomeBanner({
+    super.key,
+    required this.onExplore,
+    required this.onImport,
+  });
   @override
   Widget build(BuildContext context) => ClipRRect(
     borderRadius: BorderRadius.circular(23),
@@ -630,13 +693,24 @@ class WelcomeBanner extends StatelessWidget {
                   style: TextStyle(fontSize: 12, color: Color(0xFFA27A8B)),
                 ),
                 const SizedBox(height: 22),
-                FilledButton.icon(
-                  onPressed: onExplore,
-                  label: const Text(
-                    'Explore recipes',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  icon: const Icon(Icons.north_east, size: 18),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: [
+                    FilledButton.icon(
+                      onPressed: onExplore,
+                      label: const Text(
+                        'Explore recipes',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      icon: const Icon(Icons.north_east, size: 18),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onImport,
+                      icon: const Icon(Icons.add_link, size: 18),
+                      label: const Text('Import recipe'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -678,8 +752,8 @@ class RecipeCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Image.asset(
-                    recipe.image,
+                  RecipeArtwork(
+                    recipe: recipe,
                     height: 130,
                     width: double.infinity,
                     fit: BoxFit.contain,
@@ -699,11 +773,11 @@ class RecipeCard extends StatelessWidget {
                     runSpacing: 4,
                     children: [
                       Text(
-                        '${recipe.time} min',
+                        recipe.timeLabel,
                         style: const TextStyle(fontSize: 11, color: muted),
                       ),
                       Text(
-                        '★ ${recipe.rating}',
+                        'â˜… ${recipe.rating}',
                         style: const TextStyle(fontSize: 11, color: coral),
                       ),
                     ],
@@ -747,6 +821,92 @@ class RecipeDetails extends StatefulWidget {
 
 class _RecipeDetailsState extends State<RecipeDetails> {
   bool showSteps = false;
+  int stepIndex = 0;
+
+  Widget stepPage(Recipe recipe) => Column(
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        child: Column(
+          children: [
+            Text(recipe.name, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(height: 12),
+            Text('Step ${stepIndex + 1} of ${recipe.steps.length}'),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              value: (stepIndex + 1) / recipe.steps.length,
+            ),
+          ],
+        ),
+      ),
+      Expanded(
+        child: SingleChildScrollView(
+          key: ValueKey(stepIndex),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: RecipeArtwork(
+                  recipe: recipe,
+                  imageOverride: recipe.imageForStep(stepIndex),
+                  height: 230,
+                  width: double.infinity,
+                  fit: BoxFit.contain,
+                  semanticLabel: 'Image for step ${stepIndex + 1}',
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                recipe.steps[stepIndex],
+                style: const TextStyle(fontSize: 18, height: 1.6),
+              ),
+            ],
+          ),
+        ),
+      ),
+      SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              TextButton(
+                onPressed: () => setState(() {
+                  if (stepIndex > 0) {
+                    stepIndex--;
+                  } else {
+                    showSteps = false;
+                  }
+                }),
+                child: Text(stepIndex == 0 ? 'Details' : 'Previous'),
+              ),
+              const Spacer(),
+              FilledButton.icon(
+                onPressed: () => setState(() {
+                  if (stepIndex < recipe.steps.length - 1) {
+                    stepIndex++;
+                  } else {
+                    showSteps = false;
+                    stepIndex = 0;
+                  }
+                }),
+                icon: Icon(
+                  stepIndex == recipe.steps.length - 1
+                      ? Icons.check
+                      : Icons.arrow_forward,
+                ),
+                label: Text(
+                  stepIndex == recipe.steps.length - 1 ? 'Done' : 'Next step',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
@@ -774,129 +934,181 @@ class _RecipeDetailsState extends State<RecipeDetails> {
             const SizedBox(width: 10),
           ],
         ),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(25, 8, 25, 28),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Image.asset(
-                recipe.image,
-                width: double.infinity,
-                height: 235,
-                fit: BoxFit.contain,
-                semanticLabel: recipe.name,
-              ),
-              const SizedBox(height: 18),
-              Text(
-                recipe.name,
-                style: Theme.of(context).textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.schedule, size: 15, color: muted),
-                  const SizedBox(width: 5),
-                  Text('${recipe.time} min'),
-                  const SizedBox(width: 20),
-                  Text(
-                    '★ ${recipe.rating}',
-                    style: const TextStyle(color: coral),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 25),
-              const Text(
-                'Ingredients',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF43333E),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: recipe.ingredients
-                    .map(
-                      (ingredient) => Tooltip(
-                        message: ingredient[1],
-                        child: Semantics(
-                          label: ingredient[1],
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 9,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF8DCE2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              '${ingredient[0]} ${ingredient[1]}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: Color(0xFF6A4B5F),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-              const SizedBox(height: 25),
-              SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(value: false, label: Text('Details')),
-                  ButtonSegment(value: true, label: Text('Recipe')),
-                ],
-                selected: {showSteps},
-                onSelectionChanged: (value) =>
-                    setState(() => showSteps = value.single),
-              ),
-              const SizedBox(height: 20),
-              if (!showSteps)
-                Text(recipe.description)
-              else
-                ...recipe.steps.indexed.map(
-                  (step) => Padding(
-                    padding: const EdgeInsets.only(bottom: 17),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+        body: showSteps && recipe.steps.isNotEmpty
+            ? stepPage(recipe)
+            : SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(25, 8, 25, 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    RecipeArtwork(
+                      recipe: recipe,
+                      width: double.infinity,
+                      height: 235,
+                      fit: BoxFit.contain,
+                      semanticLabel: recipe.name,
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      recipe.name,
+                      style: Theme.of(context).textTheme.headlineMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
                       children: [
-                        CircleAvatar(
-                          radius: 13,
-                          backgroundColor: const Color(0xFFF8DCE2),
-                          child: Text(
-                            '${step.$1 + 1}',
-                            style: const TextStyle(fontSize: 11, color: coral),
-                          ),
+                        const Icon(Icons.schedule, size: 15, color: muted),
+                        const SizedBox(width: 5),
+                        Text(recipe.timeLabel),
+                        const SizedBox(width: 20),
+                        Text(
+                          'â˜… ${recipe.rating}',
+                          style: const TextStyle(color: coral),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(child: Text(step.$2)),
                       ],
                     ),
-                  ),
-                ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () => setState(() => showSteps = !showSteps),
-                  child: Text(showSteps ? 'Back to details' : "Let's cook"),
+                    if (recipe.sourceUrl != null) ...[
+                      const SizedBox(height: 16),
+                      const Text('Original recipe'),
+                      SelectableText(recipe.sourceUrl!),
+                    ],
+                    const SizedBox(height: 25),
+                    const Text(
+                      'Ingredients',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF43333E),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: recipe.ingredients
+                          .map(
+                            (ingredient) => Tooltip(
+                              message: ingredient[1],
+                              child: Semantics(
+                                label: ingredient[1],
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 9,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8DCE2),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Text(
+                                    '${ingredient[0]} ${ingredient[1]}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF6A4B5F),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    const SizedBox(height: 25),
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(value: false, label: Text('Details')),
+                        ButtonSegment(value: true, label: Text('Recipe')),
+                      ],
+                      selected: {showSteps},
+                      onSelectionChanged: (value) =>
+                          setState(() => showSteps = value.single),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(recipe.description),
+                    for (final notice in recipe.notices)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'Recipe notice: $notice',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    const SizedBox(height: 22),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => setState(() => showSteps = !showSteps),
+                        child: Text(
+                          showSteps ? 'Back to details' : "Let's cook",
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 15),
+                    const Center(
+                      child: Text(
+                        'A little time in the kitchen, a little joy.',
+                        style: TextStyle(fontSize: 10, color: muted),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 15),
-              const Center(
-                child: Text(
-                  'A little time in the kitchen, a little joy.',
-                  style: TextStyle(fontSize: 10, color: muted),
-                ),
-              ),
-            ],
-          ),
-        ),
       );
     },
   );
+}
+
+class RecipeArtwork extends StatelessWidget {
+  final Recipe recipe;
+  final double height, width;
+  final BoxFit fit;
+  final bool excludeFromSemantics;
+  final String? semanticLabel;
+  final String? imageOverride;
+  const RecipeArtwork({
+    super.key,
+    required this.recipe,
+    required this.height,
+    required this.width,
+    required this.fit,
+    this.excludeFromSemantics = false,
+    this.semanticLabel,
+    this.imageOverride,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final image = imageOverride ?? recipe.image;
+    Widget placeholder() => Container(
+      height: height,
+      width: width,
+      color: const Color(0xFFF8DCE2),
+      child: const Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.restaurant_menu, size: 64, color: coral),
+          SizedBox(height: 12),
+          Text('No photo available'),
+        ],
+      ),
+    );
+    if (image.isEmpty) return placeholder();
+    if (image.startsWith('http://') || image.startsWith('https://')) {
+      return Image.network(
+        image,
+        height: height,
+        width: width,
+        fit: fit,
+        semanticLabel: semanticLabel,
+        excludeFromSemantics: excludeFromSemantics,
+        errorBuilder: (_, error, stack) => placeholder(),
+      );
+    }
+    return Image.asset(
+      image,
+      height: height,
+      width: width,
+      fit: fit,
+      excludeFromSemantics: excludeFromSemantics,
+      semanticLabel: semanticLabel,
+      errorBuilder: (_, error, stack) => placeholder(),
+    );
+  }
 }

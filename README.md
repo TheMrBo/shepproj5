@@ -42,3 +42,31 @@ flutter build web --release --no-tree-shake-icons
 Android/iOS platform scaffolds retain development bundle identifiers and signing defaults. Configure these before store distribution.
 
 On this Windows checkout, the Flutter analyzer and icon subsetter fail on the accented directory name. The commands above use the working Dart analyzer and skip font subsetting. This affects build tooling, not recipe functionality.
+
+## Import cooking links
+
+Select **Import recipe** beside Explore recipes, paste a full HTTP(S) recipe-page URL
+(or use **Paste link** with the device clipboard), and select
+**Import recipe**. Review the extracted ingredients and steps, then select
+**Save recipe**. Imported recipes persist locally, appear in Discover under the
+Imported filter, and can be favorited to appear in Saved recipes. Importing the
+same URL again refreshes the existing recipe instead of creating a duplicate.
+The original source URL is retained in the recipe details.
+
+The importer reads Schema.org Recipe JSON-LD, including graph objects and grouped
+HowToStep instructions. It requires a title, ingredients, and instructions.
+Dish images are imported from recipe data or page image metadata. Step photos
+come from explicit step images or matching illustrated cooking instructions;
+unmatched steps display a placeholder. Some sites provide shared photo collages.
+Cooking mode shows one step per page with Previous, Next step, and Done controls.
+Full instructions are preferred over duplicate abbreviated sections; promotional
+descriptions are omitted and recipe notices are shown separately.
+Missing time is shown as “Time not listed”; imports do not invent ratings.
+Requests time out after 20 seconds and are limited to
+5 MiB. Tests use deterministic HTTP fixtures and do not depend on external sites.
+
+Native apps fetch pages directly. Flutter web imports only work when the source
+website permits cross-origin requests (CORS); most recipe sites do not. There is
+no hosted proxy in this project. Login-protected, anti-bot, JavaScript-only,
+video-only, social media, and pages without Recipe JSON-LD are not supported.
+HTTP links may also be restricted by platform transport policies; prefer HTTPS.
