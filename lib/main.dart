@@ -4,6 +4,8 @@ import 'recipe_import.dart';
 import 'import_dialog.dart';
 import 'recipe_submission_screen.dart';
 import 'recipe_attribution_legal.dart';
+import 'step_timer_widget.dart';
+import 'ingredient_prep_checklist_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1075,90 +1077,162 @@ class _RecipeDetailsState extends State<RecipeDetails> {
   int stepIndex = 0;
   double userSelectedStars = 5.0;
 
-  Widget stepPage(Recipe recipe) => Column(
-    children: [
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-        child: Column(
-          children: [
-            Text(recipe.name, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 12),
-            Text('Step ${stepIndex + 1} of ${recipe.steps.length}'),
-            const SizedBox(height: 8),
-            LinearProgressIndicator(
-              value: (stepIndex + 1) / recipe.steps.length,
-            ),
-          ],
-        ),
-      ),
-      Expanded(
-        child: SingleChildScrollView(
-          key: ValueKey(stepIndex),
-          padding: const EdgeInsets.all(24),
+  Widget stepPage(Recipe recipe) {
+    final theme = Theme.of(context);
+    final currentStepNumber = stepIndex + 1;
+    final totalSteps = recipe.steps.length;
+
+    final stepInstruction = stepIndex < recipe.instructions.length
+        ? recipe.instructions[stepIndex]
+        : InstructionStep(
+            stepNumber: currentStepNumber,
+            directionText: recipe.steps[stepIndex],
+          );
+
+    final relevantIngredients =
+        stepInstruction.filterRelevantIngredients(recipe.ingredientItems);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(18),
-                child: RecipeArtwork(
-                  recipe: recipe,
-                  imageOverride: recipe.imageForStep(stepIndex),
-                  height: 230,
+              Text(recipe.name, style: theme.textTheme.titleLarge),
+              const SizedBox(height: 12),
+              Text('Step $currentStepNumber of $totalSteps'),
+              const SizedBox(height: 8),
+              LinearProgressIndicator(
+                value: currentStepNumber / totalSteps,
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            key: ValueKey(stepIndex),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (recipe.imageForStep(stepIndex).isNotEmpty) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: RecipeArtwork(
+                      recipe: recipe,
+                      imageOverride: recipe.imageForStep(stepIndex),
+                      height: 230,
+                      width: double.infinity,
+                      fit: BoxFit.contain,
+                      semanticLabel: 'Image for step $currentStepNumber',
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+                Container(
                   width: double.infinity,
-                  fit: BoxFit.contain,
-                  semanticLabel: 'Image for step ${stepIndex + 1}',
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: theme.colorScheme.outlineVariant.withAlpha(100),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.primary,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'Step $currentStepNumber',
+                              style: TextStyle(
+                                color: theme.colorScheme.onPrimary,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        stepInstruction.directionText,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontSize: 17,
+                          height: 1.5,
+                        ),
+                      ),
+                      if (relevantIngredients.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        IngredientPrepChecklistWidget(
+                          title: 'Ingredients for Step $currentStepNumber',
+                          ingredients: relevantIngredients,
+                        ),
+                      ],
+                      if (stepInstruction.timerDuration != null) ...[
+                        const SizedBox(height: 12),
+                        StepTimerWidget(
+                          duration: stepInstruction.timerDuration!,
+                          stepLabel: 'Step $currentStepNumber Cooking Timer',
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                recipe.steps[stepIndex],
-                style: const TextStyle(fontSize: 18, height: 1.6),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-      SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              TextButton(
-                onPressed: () => setState(() {
-                  if (stepIndex > 0) {
-                    stepIndex--;
-                  } else {
-                    showSteps = false;
-                  }
-                }),
-                child: Text(stepIndex == 0 ? 'Details' : 'Previous'),
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: () => setState(() {
-                  if (stepIndex < recipe.steps.length - 1) {
-                    stepIndex++;
-                  } else {
-                    showSteps = false;
-                    stepIndex = 0;
-                  }
-                }),
-                icon: Icon(
-                  stepIndex == recipe.steps.length - 1
-                      ? Icons.check
-                      : Icons.arrow_forward,
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                TextButton(
+                  onPressed: () => setState(() {
+                    if (stepIndex > 0) {
+                      stepIndex--;
+                    } else {
+                      showSteps = false;
+                    }
+                  }),
+                  child: Text(stepIndex == 0 ? 'Details' : 'Previous'),
                 ),
-                label: Text(
-                  stepIndex == recipe.steps.length - 1 ? 'Done' : 'Next step',
+                const Spacer(),
+                FilledButton.icon(
+                  onPressed: () => setState(() {
+                    if (stepIndex < recipe.steps.length - 1) {
+                      stepIndex++;
+                    } else {
+                      showSteps = false;
+                      stepIndex = 0;
+                    }
+                  }),
+                  icon: Icon(
+                    stepIndex == recipe.steps.length - 1
+                        ? Icons.check
+                        : Icons.arrow_forward,
+                  ),
+                  label: Text(
+                    stepIndex == recipe.steps.length - 1 ? 'Done' : 'Next step',
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.store,
@@ -1262,12 +1336,12 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
-                      children: recipe.ingredients
+                      children: recipe.ingredientItems
                           .map(
                             (ingredient) => Tooltip(
-                              message: ingredient[1],
+                              message: ingredient.displayText,
                               child: Semantics(
-                                label: ingredient[1],
+                                label: ingredient.displayText,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 12,
@@ -1278,7 +1352,7 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Text(
-                                    '${ingredient[0]} ${ingredient[1]}',
+                                    ingredient.displayText,
                                     style: const TextStyle(
                                       fontSize: 12,
                                       color: Color(0xFF6A4B5F),

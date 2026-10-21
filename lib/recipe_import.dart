@@ -5,6 +5,7 @@ import 'package:html/parser.dart' as html;
 import 'package:html/dom.dart' as dom;
 import 'package:http/http.dart' as http;
 import 'recipe.dart';
+import 'recipe_duration_parser.dart';
 
 class RecipeImportException implements Exception {
   final String message;
@@ -359,7 +360,7 @@ String _dishImage(
   return '';
 }
 
-List<({String text, String image})> _steps(
+List<({String text, String image, Duration? duration})> _steps(
   dynamic value,
   Uri base,
   dom.Document document,
@@ -372,7 +373,9 @@ List<({String text, String image})> _steps(
       return _steps(value['itemListElement'], base, document);
     }
     var image = _imageUrl(value['image'], base);
-    // Some sites put photos only in the HTML element linked by a step.
+    final isoDurationStr = (value['performTime'] ?? value['duration'] ?? value['time']) as String?;
+    Duration? stepDuration = isoDurationStr != null ? RecipeDurationParser.parseIso8601(isoDurationStr) : null;
+
     final stepUrl = Uri.tryParse(value['url'] is String ? value['url'] : '');
     if (image.isEmpty && stepUrl != null && stepUrl.hasFragment) {
       final resolved = base.resolveUri(stepUrl);
@@ -384,23 +387,29 @@ List<({String text, String image})> _steps(
     }
     return _steps(value['text'] ?? value['name'], base, document)
         .map(
-          (step) =>
-              (text: step.text, image: image.isEmpty ? step.image : image),
+          (step) => (
+            text: step.text,
+            image: image.isEmpty ? step.image : image,
+            duration: step.duration ?? stepDuration,
+          ),
         )
         .toList();
   }
   if (value is String) {
     return value
         .split(RegExp(r'\r?\n|<br\s*/?>', caseSensitive: false))
-        .map(
-          (s) => (
-            text: _instructionText(s),
+        .map((s) {
+          final cleanText = _instructionText(s);
+          final extracted = RecipeDurationParser.extractDuration(cleanText);
+          return (
+            text: cleanText,
             image: _imageUrl(
               html.parseFragment(s).querySelector('img')?.attributes['src'],
               base,
             ),
-          ),
-        )
+            duration: extracted.duration,
+          );
+        })
         .where((s) => s.text.isNotEmpty)
         .toList();
   }
@@ -463,14 +472,31 @@ Recipe parseRecipeHtml(String source, Uri url) {
                   image: s.image.isNotEmpty
                       ? s.image
                       : _matchedPhoto(s.text, illustrated),
+                  duration: s.duration ??
+                      RecipeDurationParser.extractDuration(s.text).duration,
                 ),
               )
               .where((s) => s.text.isNotEmpty)
               .toList();
+
       if (name.isEmpty || ingredients.isEmpty || steps.isEmpty) {
         continue;
       }
       final total = _minutes(item['totalTime']);
+
+      final structuredInstructions = steps
+          .asMap()
+          .entries
+          .map(
+            (entry) => {
+              'stepNumber': entry.key + 1,
+              'directionText': entry.value.text,
+              if (entry.value.duration != null)
+                'timerDurationSeconds': entry.value.duration!.inSeconds,
+            },
+          )
+          .toList();
+
       return Recipe.fromJson({
         'id': 'import:${url.removeFragment()}',
         'sourceUrl': url.removeFragment().toString(),
@@ -485,6 +511,7 @@ Recipe parseRecipeHtml(String source, Uri url) {
             : _minutes(item['prepTime']) + _minutes(item['cookTime']),
         'ingredients': ingredients.map((v) => ['•', v]).toList(),
         'steps': steps.map((step) => step.text).toList(),
+        'instructions': structuredInstructions,
         'stepImages': steps.map((step) => step.image).toList(),
       });
     }

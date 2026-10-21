@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'recipe.dart';
 import 'recipe_attribution_legal.dart';
+import 'step_timer_widget.dart';
 
 class IngredientFormInput {
   final TextEditingController quantityController;
@@ -34,12 +35,21 @@ class IngredientFormInput {
 
 class InstructionStepFormInput {
   final TextEditingController directionController;
+  Duration? timerDuration;
 
-  InstructionStepFormInput({String directionText = ''})
-      : directionController = TextEditingController(text: directionText);
+  InstructionStepFormInput({
+    String directionText = '',
+    this.timerDuration,
+  }) : directionController = TextEditingController(text: directionText);
 
   String get directionText => directionController.text.trim();
   bool get isValid => directionText.isNotEmpty;
+
+  InstructionStep toInstructionStep(int stepNumber) => InstructionStep(
+        stepNumber: stepNumber,
+        directionText: directionText,
+        timerDuration: timerDuration,
+      );
 
   void dispose() {
     directionController.dispose();
@@ -136,11 +146,17 @@ class _RecipeSubmissionScreenState extends State<RecipeSubmissionScreen> {
       _ingredientInputs.add(IngredientFormInput());
     }
 
-    // Populate steps from initial recipe while preserving state
-    if (init != null && init.steps.isNotEmpty) {
+    // Populate steps from initial recipe while preserving state and timer durations
+    if (init != null && init.instructions.isNotEmpty) {
+      for (final step in init.instructions) {
+        _instructionInputs.add(InstructionStepFormInput(
+          directionText: step.directionText,
+          timerDuration: step.timerDuration,
+        ));
+      }
+    } else if (init != null && init.steps.isNotEmpty) {
       for (final step in init.steps) {
-        _instructionInputs
-            .add(InstructionStepFormInput(directionText: step));
+        _instructionInputs.add(InstructionStepFormInput(directionText: step));
       }
     } else {
       _instructionInputs.add(InstructionStepFormInput());
@@ -219,12 +235,16 @@ class _RecipeSubmissionScreenState extends State<RecipeSubmissionScreen> {
       return;
     }
 
-    final validSteps = _instructionInputs
-        .where((i) => i.isValid)
-        .map((i) => i.directionText)
-        .toList();
+    final validInstructions = <InstructionStep>[];
+    for (var i = 0; i < _instructionInputs.length; i++) {
+      if (_instructionInputs[i].isValid) {
+        validInstructions.add(
+          _instructionInputs[i].toInstructionStep(validInstructions.length + 1),
+        );
+      }
+    }
 
-    if (validSteps.isEmpty) {
+    if (validInstructions.isEmpty) {
       setState(() {
         _validationError = 'Please add at least one cooking step.';
       });
@@ -252,7 +272,7 @@ class _RecipeSubmissionScreenState extends State<RecipeSubmissionScreen> {
           30,
       description: _descriptionController.text.trim(),
       ingredients: validIngredients,
-      steps: validSteps,
+      instructions: validInstructions,
       isCommunity: true,
       authorName: _authorNameController.text.trim().isEmpty
           ? (widget.initialRecipe?.authorName ?? 'Community Chef')
@@ -587,11 +607,54 @@ class _RecipeSubmissionScreenState extends State<RecipeSubmissionScreen> {
                               ),
                             ),
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            onPressed: _instructionInputs.length > 1
-                                ? () => _removeInstructionRow(i)
-                                : null,
+                          const SizedBox(width: 8),
+                          Column(
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: _instructionInputs.length > 1
+                                    ? () => _removeInstructionRow(i)
+                                    : null,
+                              ),
+                              ActionChip(
+                                avatar: Icon(
+                                  _instructionInputs[i].timerDuration != null
+                                      ? Icons.timer
+                                      : Icons.timer_outlined,
+                                  size: 14,
+                                  color: _instructionInputs[i].timerDuration != null
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.onSurfaceVariant,
+                                ),
+                                label: Text(
+                                  _instructionInputs[i].timerDuration != null
+                                      ? '${_instructionInputs[i].timerDuration!.inMinutes}m ${_instructionInputs[i].timerDuration!.inSeconds % 60}s'
+                                      : '+ Timer',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight:
+                                        _instructionInputs[i].timerDuration != null
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                  ),
+                                ),
+                                onPressed: () async {
+                                  final result = await showDialog<Duration>(
+                                    context: context,
+                                    builder: (_) => StepTimerPickerDialog(
+                                      initialDuration:
+                                          _instructionInputs[i].timerDuration,
+                                    ),
+                                  );
+                                  if (result != null) {
+                                    setState(() {
+                                      _instructionInputs[i].timerDuration =
+                                          result.inSeconds > 0 ? result : null;
+                                    });
+                                  }
+                                },
+                              ),
+                            ],
                           ),
                         ],
                       ),

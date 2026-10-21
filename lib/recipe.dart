@@ -1,51 +1,179 @@
+String _stripEmojis(String text) {
+  if (text.isEmpty) return '';
+  final emojiRegExp = RegExp(
+    r'(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])',
+  );
+  return text.replaceAll(emojiRegExp, '').trim();
+}
+
 class IngredientItem {
   final String quantity;
   final String unit;
   final String name;
+  final String prepAction;
+  final bool isPrepped;
 
   const IngredientItem({
     required this.quantity,
     required this.unit,
     required this.name,
+    this.prepAction = '',
+    this.isPrepped = false,
   });
 
-  factory IngredientItem.fromJson(Map<String, dynamic> json) => IngredientItem(
-        quantity: json['quantity'] as String? ?? '',
-        unit: json['unit'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-      );
+  factory IngredientItem.fromJson(Map<String, dynamic> json) {
+    var rawName = _stripEmojis(json['name'] as String? ?? '');
+    var rawAction = _stripEmojis(json['prepAction'] as String? ?? '');
+
+    if (rawAction.isEmpty && rawName.contains(',')) {
+      final parts = rawName.split(',');
+      if (parts.length >= 2) {
+        rawName = parts[0].trim();
+        rawAction = parts.sublist(1).join(',').trim();
+      }
+    } else if (rawAction.isEmpty &&
+        rawName.contains('(') &&
+        rawName.endsWith(')')) {
+      final start = rawName.indexOf('(');
+      final end = rawName.lastIndexOf(')');
+      if (start > 0 && end > start) {
+        rawAction = rawName.substring(start + 1, end).trim();
+        rawName = rawName.substring(0, start).trim();
+      }
+    }
+
+    if (rawAction.isNotEmpty) {
+      rawAction = rawAction[0].toUpperCase() + rawAction.substring(1);
+    }
+
+    return IngredientItem(
+      quantity: _stripEmojis(json['quantity'] as String? ?? ''),
+      unit: _stripEmojis(json['unit'] as String? ?? ''),
+      name: rawName,
+      prepAction: rawAction,
+      isPrepped: json['isPrepped'] as bool? ?? false,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'quantity': quantity,
         'unit': unit,
         'name': name,
+        'prepAction': prepAction,
+        'isPrepped': isPrepped,
       };
 
+  IngredientItem copyWith({
+    String? quantity,
+    String? unit,
+    String? name,
+    String? prepAction,
+    bool? isPrepped,
+  }) {
+    return IngredientItem(
+      quantity: quantity ?? this.quantity,
+      unit: unit ?? this.unit,
+      name: name ?? this.name,
+      prepAction: prepAction ?? this.prepAction,
+      isPrepped: isPrepped ?? this.isPrepped,
+    );
+  }
+
   String get displayText {
-    final parts = [quantity, unit, name].where((s) => s.trim().isNotEmpty);
-    return parts.isEmpty ? 'Ingredient' : parts.join(' ');
+    final cleanQty = _stripEmojis(quantity);
+    final cleanUnit = _stripEmojis(unit);
+    final cleanName = _stripEmojis(name);
+
+    final parts = [cleanQty, cleanUnit, cleanName].where((s) => s.trim().isNotEmpty);
+    final baseText = parts.isEmpty ? 'Ingredient' : parts.join(' ');
+    if (prepAction.isNotEmpty) {
+      return '$baseText • ${_stripEmojis(prepAction)}';
+    }
+    return baseText;
   }
 }
 
 class InstructionStep {
   final int stepNumber;
   final String directionText;
+  final Duration? timerDuration;
+  final List<String> ingredientNames;
 
   const InstructionStep({
     required this.stepNumber,
     required this.directionText,
+    this.timerDuration,
+    this.ingredientNames = const [],
   });
 
-  factory InstructionStep.fromJson(Map<String, dynamic> json) =>
-      InstructionStep(
-        stepNumber: json['stepNumber'] as int? ?? 1,
-        directionText: json['directionText'] as String? ?? '',
-      );
+  factory InstructionStep.fromJson(Map<String, dynamic> json) {
+    Duration? timer;
+    if (json['timerDurationSeconds'] != null) {
+      timer = Duration(seconds: json['timerDurationSeconds'] as int);
+    } else if (json['timerDurationInSeconds'] != null) {
+      timer = Duration(seconds: json['timerDurationInSeconds'] as int);
+    }
+    return InstructionStep(
+      stepNumber: json['stepNumber'] as int? ?? 1,
+      directionText: json['directionText'] as String? ?? '',
+      timerDuration: timer,
+      ingredientNames:
+          List<String>.from(json['ingredientNames'] as List? ?? []),
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'stepNumber': stepNumber,
         'directionText': directionText,
+        if (timerDuration != null)
+          'timerDurationSeconds': timerDuration!.inSeconds,
+        if (ingredientNames.isNotEmpty) 'ingredientNames': ingredientNames,
       };
+
+  List<IngredientItem> filterRelevantIngredients(
+      List<IngredientItem> allIngredients) {
+    if (allIngredients.isEmpty) return [];
+
+    final text = directionText.toLowerCase();
+    return allIngredients.where((ingredient) {
+      if (ingredientNames.contains(ingredient.name)) return true;
+
+      final nameLower = ingredient.name.toLowerCase().trim();
+      if (nameLower.isEmpty) return false;
+
+      if (text.contains(nameLower)) return true;
+
+      final words = nameLower.split(RegExp(r'\s+')).where((w) =>
+          w.length > 2 &&
+          !const {
+            'and',
+            'the',
+            'for',
+            'with',
+            'fresh',
+            'large',
+            'medium',
+            'small'
+          }.contains(w));
+
+      return words.any((word) => text.contains(word));
+    }).toList();
+  }
+
+  InstructionStep copyWith({
+    int? stepNumber,
+    String? directionText,
+    Duration? timerDuration,
+    List<String>? ingredientNames,
+    bool clearTimer = false,
+  }) {
+    return InstructionStep(
+      stepNumber: stepNumber ?? this.stepNumber,
+      directionText: directionText ?? this.directionText,
+      timerDuration: clearTimer ? null : (timerDuration ?? this.timerDuration),
+      ingredientNames: ingredientNames ?? this.ingredientNames,
+    );
+  }
 }
 
 class RecipeAttribution {
