@@ -73,6 +73,8 @@ void main() {
     await tester.ensureVisible(find.text('Recipe'));
     await tester.tap(find.text('Recipe'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Next step'));
+    await tester.pumpAndSettle();
     expect(find.text(store.recipes[1].steps[0]), findsOneWidget);
     final steps = store.recipes[1].steps;
     expect(find.text(steps[1]), findsNothing);

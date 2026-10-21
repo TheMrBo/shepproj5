@@ -1079,18 +1079,26 @@ class _RecipeDetailsState extends State<RecipeDetails> {
 
   Widget stepPage(Recipe recipe) {
     final theme = Theme.of(context);
+    final hasPrepStep = recipe.ingredientItems.isNotEmpty;
+    final totalSteps = recipe.steps.length + (hasPrepStep ? 1 : 0);
     final currentStepNumber = stepIndex + 1;
-    final totalSteps = recipe.steps.length;
 
-    final stepInstruction = stepIndex < recipe.instructions.length
-        ? recipe.instructions[stepIndex]
-        : InstructionStep(
-            stepNumber: currentStepNumber,
-            directionText: recipe.steps[stepIndex],
-          );
+    final isPrepStep = hasPrepStep && stepIndex == 0;
+    final cookingStepIndex = hasPrepStep ? stepIndex - 1 : stepIndex;
 
-    final relevantIngredients =
-        stepInstruction.filterRelevantIngredients(recipe.ingredientItems);
+    final stepInstruction = !isPrepStep &&
+            cookingStepIndex >= 0 &&
+            cookingStepIndex < recipe.instructions.length
+        ? recipe.instructions[cookingStepIndex]
+        : (isPrepStep
+            ? const InstructionStep(stepNumber: 1, directionText: '')
+            : InstructionStep(
+                stepNumber: currentStepNumber,
+                directionText: recipe.steps[cookingStepIndex]));
+
+    final relevantIngredients = !isPrepStep
+        ? stepInstruction.filterRelevantIngredients(recipe.ingredientItems)
+        : <IngredientItem>[];
 
     return Column(
       children: [
@@ -1115,78 +1123,130 @@ class _RecipeDetailsState extends State<RecipeDetails> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (recipe.imageForStep(stepIndex).isNotEmpty) ...[
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: RecipeArtwork(
-                      recipe: recipe,
-                      imageOverride: recipe.imageForStep(stepIndex),
-                      height: 230,
-                      width: double.infinity,
-                      fit: BoxFit.contain,
-                      semanticLabel: 'Image for step $currentStepNumber',
+                if (isPrepStep) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withAlpha(100),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: theme.colorScheme.outlineVariant.withAlpha(100),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primary,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'Step $currentStepNumber',
-                              style: TextStyle(
-                                color: theme.colorScheme.onPrimary,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'Step 1: Prep & Measure',
+                                style: TextStyle(
+                                  color: theme.colorScheme.onPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        stepInstruction.directionText,
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          fontSize: 17,
-                          height: 1.5,
+                          ],
                         ),
-                      ),
-                      if (relevantIngredients.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        Text(
+                          'Gather, chop, and measure all ingredients before starting time-sensitive cooking steps.',
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontSize: 16,
+                            height: 1.5,
+                          ),
+                        ),
                         const SizedBox(height: 16),
                         IngredientPrepChecklistWidget(
-                          title: 'Ingredients for Step $currentStepNumber',
-                          ingredients: relevantIngredients,
+                          title: 'Master Prep Checklist (Mise en Place)',
+                          ingredients: recipe.ingredientItems,
                         ),
                       ],
-                      if (stepInstruction.timerDuration != null) ...[
-                        const SizedBox(height: 12),
-                        StepTimerWidget(
-                          duration: stepInstruction.timerDuration!,
-                          stepLabel: 'Step $currentStepNumber Cooking Timer',
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
-                ),
+                ] else ...[
+                  if (recipe.imageForStep(cookingStepIndex).isNotEmpty) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: RecipeArtwork(
+                        recipe: recipe,
+                        imageOverride: recipe.imageForStep(cookingStepIndex),
+                        height: 230,
+                        width: double.infinity,
+                        fit: BoxFit.contain,
+                        semanticLabel: 'Image for step $currentStepNumber',
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: theme.colorScheme.outlineVariant.withAlpha(100),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'Step $currentStepNumber',
+                                style: TextStyle(
+                                  color: theme.colorScheme.onPrimary,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          stepInstruction.directionText,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontSize: 17,
+                            height: 1.5,
+                          ),
+                        ),
+                        if (relevantIngredients.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          IngredientPrepChecklistWidget(
+                            title: 'Ingredients for Step $currentStepNumber',
+                            ingredients: relevantIngredients,
+                          ),
+                        ],
+                        if (stepInstruction.timerDuration != null) ...[
+                          const SizedBox(height: 12),
+                          StepTimerWidget(
+                            duration: stepInstruction.timerDuration!,
+                            stepLabel: 'Step $currentStepNumber Cooking Timer',
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1210,7 +1270,7 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                 const Spacer(),
                 FilledButton.icon(
                   onPressed: () => setState(() {
-                    if (stepIndex < recipe.steps.length - 1) {
+                    if (stepIndex < totalSteps - 1) {
                       stepIndex++;
                     } else {
                       showSteps = false;
@@ -1218,12 +1278,12 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                     }
                   }),
                   icon: Icon(
-                    stepIndex == recipe.steps.length - 1
+                    stepIndex == totalSteps - 1
                         ? Icons.check
                         : Icons.arrow_forward,
                   ),
                   label: Text(
-                    stepIndex == recipe.steps.length - 1 ? 'Done' : 'Next step',
+                    stepIndex == totalSteps - 1 ? 'Done' : 'Next step',
                   ),
                 ),
               ],
