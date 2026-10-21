@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'recipe.dart';
 import 'recipe_import.dart';
 import 'import_dialog.dart';
+import 'recipe_submission_screen.dart';
+import 'recipe_attribution_legal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -405,11 +407,11 @@ class _KitchenScreenState extends State<KitchenScreen> {
   }
 
   Future<void> openAddCommunityRecipeDialog() async {
-    final recipe = await showDialog<Recipe>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => CreateCommunityRecipeDialog(
-        onSave: widget.store.addCommunityRecipe,
+    final recipe = await Navigator.of(context).push<Recipe>(
+      MaterialPageRoute(
+        builder: (_) => RecipeSubmissionScreen(
+          onSave: widget.store.addCommunityRecipe,
+        ),
       ),
     );
     if (!mounted || recipe == null) {
@@ -1206,6 +1208,11 @@ class _RecipeDetailsState extends State<RecipeDetails> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    RecipeAttributionHeader(
+                      recipe: recipe,
+                      onSave: () => saveRecipe(context, widget.store, recipe.id),
+                    ),
+                    const SizedBox(height: 16),
                     RecipeArtwork(
                       recipe: recipe,
                       width: double.infinity,
@@ -1437,7 +1444,14 @@ class RecipeArtwork extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    final image = imageOverride ?? recipe.image;
+    var image = imageOverride ?? recipe.image;
+    if (image.isNotEmpty &&
+        !image.startsWith('http://') &&
+        !image.startsWith('https://') &&
+        !image.startsWith('assets/')) {
+      image = 'assets/$image.webp';
+    }
+
     Widget placeholder() => Container(
       height: height,
       width: width,

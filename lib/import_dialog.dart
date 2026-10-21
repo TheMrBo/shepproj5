@@ -134,31 +134,119 @@ class _ImportRecipeDialogState extends State<ImportRecipeDialog> {
                   preview!.name,
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                Text(preview!.timeLabel),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(Icons.schedule, size: 14, color: Color(0xFF887E8D)),
+                    const SizedBox(width: 4),
+                    Text(
+                      preview!.timeLabel,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF887E8D)),
+                    ),
+                  ],
+                ),
                 for (final notice in preview!.notices)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text('Recipe notice: $notice'),
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF3E0),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Notice: $notice',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFFE65100)),
+                      ),
+                    ),
                   ),
                 const SizedBox(height: 8),
-                SelectableText(preview!.sourceUrl!),
-                if (preview!.description.isNotEmpty) Text(preview!.description),
-                const SizedBox(height: 12),
+                SelectableText(
+                  preview!.sourceUrl!,
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF887E8D)),
+                ),
+                if (preview!.description.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    preview!.description,
+                    style: const TextStyle(fontSize: 12, height: 1.5),
+                  ),
+                ],
+                const SizedBox(height: 16),
                 const Text(
                   'Ingredients',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Color(0xFF43333E),
+                  ),
                 ),
+                const SizedBox(height: 8),
                 for (final ingredient in preview!.ingredients)
-                  Text('• ${ingredient[1]}'),
-                const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '• ',
+                          style: TextStyle(
+                            color: Color(0xFFEC4E6E),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            ingredient[1],
+                            style: const TextStyle(fontSize: 13, height: 1.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 16),
                 const Text(
-                  'Cooking steps',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  'Cooking Steps',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Color(0xFF43333E),
+                  ),
                 ),
+                const SizedBox(height: 8),
                 for (var i = 0; i < preview!.steps.length; i++)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text('${i + 1}. ${preview!.steps[i]}'),
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 22,
+                          height: 22,
+                          margin: const EdgeInsets.only(right: 10, top: 2),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFEC4E6E),
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            '${i + 1}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            preview!.steps[i],
+                            style: const TextStyle(fontSize: 13, height: 1.5),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
               ],
               if (busy)
