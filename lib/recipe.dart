@@ -7,6 +7,7 @@ String _stripEmojis(String text) {
 }
 
 class IngredientItem {
+  final String id;
   final String quantity;
   final String unit;
   final String name;
@@ -14,12 +15,15 @@ class IngredientItem {
   final bool isPrepped;
 
   const IngredientItem({
+    String? id,
     required this.quantity,
     required this.unit,
     required this.name,
     this.prepAction = '',
     this.isPrepped = false,
-  });
+  }) : id = id ?? name;
+
+  double get quantityNum => double.tryParse(quantity) ?? 0.0;
 
   factory IngredientItem.fromJson(Map<String, dynamic> json) {
     var rawName = _stripEmojis(json['name'] as String? ?? '');
@@ -46,8 +50,17 @@ class IngredientItem {
       rawAction = rawAction[0].toUpperCase() + rawAction.substring(1);
     }
 
+    final rawQty = json['quantity'];
+    String qtyString = '';
+    if (rawQty is num) {
+      qtyString = rawQty.toString();
+    } else if (rawQty is String) {
+      qtyString = _stripEmojis(rawQty);
+    }
+
     return IngredientItem(
-      quantity: _stripEmojis(json['quantity'] as String? ?? ''),
+      id: json['id'] as String? ?? rawName,
+      quantity: qtyString,
       unit: _stripEmojis(json['unit'] as String? ?? ''),
       name: rawName,
       prepAction: rawAction,
@@ -56,6 +69,7 @@ class IngredientItem {
   }
 
   Map<String, dynamic> toJson() => {
+        'id': id,
         'quantity': quantity,
         'unit': unit,
         'name': name,
@@ -64,6 +78,7 @@ class IngredientItem {
       };
 
   IngredientItem copyWith({
+    String? id,
     String? quantity,
     String? unit,
     String? name,
@@ -71,6 +86,7 @@ class IngredientItem {
     bool? isPrepped,
   }) {
     return IngredientItem(
+      id: id ?? this.id,
       quantity: quantity ?? this.quantity,
       unit: unit ?? this.unit,
       name: name ?? this.name,
@@ -84,7 +100,8 @@ class IngredientItem {
     final cleanUnit = _stripEmojis(unit);
     final cleanName = _stripEmojis(name);
 
-    final parts = [cleanQty, cleanUnit, cleanName].where((s) => s.trim().isNotEmpty);
+    final parts =
+        [cleanQty, cleanUnit, cleanName].where((s) => s.trim().isNotEmpty);
     final baseText = parts.isEmpty ? 'Ingredient' : parts.join(' ');
     if (prepAction.isNotEmpty) {
       return '$baseText • ${_stripEmojis(prepAction)}';
@@ -93,17 +110,23 @@ class IngredientItem {
   }
 }
 
+typedef RecipeIngredient = IngredientItem;
+
 class InstructionStep {
   final int stepNumber;
   final String directionText;
   final Duration? timerDuration;
   final List<String> ingredientNames;
+  final List<String> ingredientIds;
+  final String? imageUrl;
 
   const InstructionStep({
     required this.stepNumber,
     required this.directionText,
     this.timerDuration,
     this.ingredientNames = const [],
+    this.ingredientIds = const [],
+    this.imageUrl,
   });
 
   factory InstructionStep.fromJson(Map<String, dynamic> json) {
@@ -119,6 +142,8 @@ class InstructionStep {
       timerDuration: timer,
       ingredientNames:
           List<String>.from(json['ingredientNames'] as List? ?? []),
+      ingredientIds: List<String>.from(json['ingredientIds'] as List? ?? []),
+      imageUrl: json['imageUrl'] as String? ?? json['image'] as String?,
     );
   }
 
@@ -128,6 +153,8 @@ class InstructionStep {
         if (timerDuration != null)
           'timerDurationSeconds': timerDuration!.inSeconds,
         if (ingredientNames.isNotEmpty) 'ingredientNames': ingredientNames,
+        if (ingredientIds.isNotEmpty) 'ingredientIds': ingredientIds,
+        if (imageUrl != null) 'imageUrl': imageUrl,
       };
 
   List<IngredientItem> filterRelevantIngredients(
@@ -136,6 +163,7 @@ class InstructionStep {
 
     final text = directionText.toLowerCase();
     return allIngredients.where((ingredient) {
+      if (ingredientIds.contains(ingredient.id)) return true;
       if (ingredientNames.contains(ingredient.name)) return true;
 
       final nameLower = ingredient.name.toLowerCase().trim();
@@ -165,6 +193,8 @@ class InstructionStep {
     String? directionText,
     Duration? timerDuration,
     List<String>? ingredientNames,
+    List<String>? ingredientIds,
+    String? imageUrl,
     bool clearTimer = false,
   }) {
     return InstructionStep(
@@ -172,9 +202,13 @@ class InstructionStep {
       directionText: directionText ?? this.directionText,
       timerDuration: clearTimer ? null : (timerDuration ?? this.timerDuration),
       ingredientNames: ingredientNames ?? this.ingredientNames,
+      ingredientIds: ingredientIds ?? this.ingredientIds,
+      imageUrl: imageUrl ?? this.imageUrl,
     );
   }
 }
+
+typedef RecipeStep = InstructionStep;
 
 class RecipeAttribution {
   final String sourceName;
