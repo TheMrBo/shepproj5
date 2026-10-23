@@ -19,6 +19,10 @@ For Android, start an emulator or connect a phone, then run `flutter run`. Use `
 - Recipe and ingredient search, category filters, and empty states
 - Favorites persisted on the device using shared_preferences
 - Ingredient lists and cooking steps
+- Cook with what I have: saved pantry ingredients, ranked recipe matches,
+  missing ingredients, and an all-ingredients-available filter on Discover.
+  Matching uses ingredient names, common plurals, and preparation words;
+  quantities and substitutions are not inferred.
 - Bundled reference artwork; no image service or backend required
 
 ## Source
